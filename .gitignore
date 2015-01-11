@@ -2,3 +2,7 @@
 *.a
 *.so
 pung-server
+config.json
+*.csr
+*.crt
+*.key
