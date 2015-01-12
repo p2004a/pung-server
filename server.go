@@ -1,19 +1,113 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
-	log.Printf("Handled connection from: %s", conn.RemoteAddr().String())
-	conn.Write([]byte("hello\n"))
+type ConnHandler struct {
+	conn    net.Conn
+	scanner *bufio.Scanner
+}
+
+func NewConnHandler(conn net.Conn) *ConnHandler {
+	return &ConnHandler{conn: conn}
+}
+
+type ClientRequest struct {
+	cSeq, sSeq int
+	message    string
+	payload    []string
+}
+
+func (cr *ClientRequest) String() string {
+	payload := strings.Join(cr.payload, " ")
+	if cr.sSeq == -1 {
+		return fmt.Sprintf("c%d %s\n%s\n", cr.cSeq, cr.message, payload)
+	} else {
+		return fmt.Sprintf("c%d s%d %s\n%s\n", cr.cSeq, cr.sSeq, cr.message, payload)
+	}
+}
+
+func (c *ConnHandler) getRequest() (*ClientRequest, error) {
+	var lines [2]string
+	var i int
+
+	for i = 0; i < 2 && c.scanner.Scan(); i++ {
+		lines[i] = c.scanner.Text()
+	}
+
+	if err := c.scanner.Err(); err != nil {
+		return nil, err
+	}
+	switch i {
+	case 0:
+		return nil, nil
+	case 1:
+		return nil, errors.New("Client closed connection without providing payload for last message")
+	}
+
+	req := new(ClientRequest)
+	headRE, err := regexp.Compile("^c(\\d{1,9}) (?:s(\\d{1,9}) )?([a-z_]{3,20})$")
+
+	if err != nil {
+		panic("Cannot compile regexp")
+	}
+	if !headRE.MatchString(lines[0]) {
+		return nil, errors.New("Client request doesn't contain correct header")
+	}
+
+	matches := headRE.FindStringSubmatch(lines[0])
+
+	var res uint64
+	res, err = strconv.ParseUint(matches[1], 10, 32)
+	if err != nil {
+		panic(err)
+	}
+	req.cSeq = int(res)
+
+	if matches[2] == "" {
+		req.sSeq = -1
+	} else {
+		res, err = strconv.ParseUint(matches[2], 10, 32)
+		if err != nil {
+			panic(err)
+		}
+		req.sSeq = int(res)
+	}
+
+	req.message = matches[3]
+	req.payload = strings.Split(lines[1], " ")
+
+	return req, nil
+}
+
+func (c *ConnHandler) Run() {
+	defer c.conn.Close()
+
+	c.scanner = bufio.NewScanner(c.conn)
+
+	for {
+		req, err := c.getRequest()
+		if err != nil {
+			log.Printf("Error while parsing request: %s", err.Error())
+			return
+		}
+		if req == nil {
+			return
+		}
+		fmt.Print(req)
+	}
 }
 
 type ServerConfiguration struct {
@@ -89,6 +183,8 @@ func main() {
 			log.Fatal(err)
 			os.Exit(2)
 		}
-		go handleConnection(conn)
+		log.Printf("Connection from: %s", conn.RemoteAddr().String())
+		handler := NewConnHandler(conn)
+		go handler.Run()
 	}
 }
