@@ -13,16 +13,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
-
-type ConnHandler struct {
-	conn    net.Conn
-	scanner *bufio.Scanner
-}
-
-func NewConnHandler(conn net.Conn) *ConnHandler {
-	return &ConnHandler{conn: conn}
-}
 
 type ClientRequest struct {
 	cSeq, sSeq int
@@ -37,6 +29,33 @@ func (cr *ClientRequest) String() string {
 	} else {
 		return fmt.Sprintf("c%d s%d %s\n%s\n", cr.cSeq, cr.sSeq, cr.message, payload)
 	}
+}
+
+type ClientResponse ClientRequest
+
+func (cr *ClientResponse) String() string {
+	payload := strings.Join(cr.payload, " ")
+
+	if cr.sSeq == -1 { // simple assertion just for case
+		panic("cr.sSeq == -1")
+	}
+
+	if cr.cSeq == -1 {
+		return fmt.Sprintf("s%d %s\n%s\n", cr.sSeq, cr.message, payload)
+	} else {
+		return fmt.Sprintf("s%d c%d %s\n%s\n", cr.sSeq, cr.cSeq, cr.message, payload)
+	}
+}
+
+type ConnHandler struct {
+	conn    net.Conn
+	scanner *bufio.Scanner
+	resChan chan<- *ClientResponse
+	seqNum  <-chan int
+}
+
+func NewConnHandler(conn net.Conn) *ConnHandler {
+	return &ConnHandler{conn: conn}
 }
 
 func (c *ConnHandler) getRequest() (*ClientRequest, error) {
@@ -92,10 +111,53 @@ func (c *ConnHandler) getRequest() (*ClientRequest, error) {
 	return req, nil
 }
 
+func sequenceGenerator(start int) <-chan int {
+	seq := make(chan int, 10)
+
+	go func() {
+		for i := start; ; i++ {
+			seq <- i
+		}
+	}()
+
+	return seq
+}
+
 func (c *ConnHandler) Run() {
 	defer c.conn.Close()
 
 	c.scanner = bufio.NewScanner(c.conn)
+
+	c.seqNum = sequenceGenerator(1)
+
+	resChan := make(chan *ClientResponse, 100)
+	defer close(resChan)
+	c.resChan = resChan
+
+	go func() {
+		for res := range resChan {
+			c.conn.Write([]byte(res.String()))
+		}
+	}()
+
+	stopPing := make(chan bool)
+	go func() {
+		t := time.Tick(3 * time.Second)
+		for {
+			select {
+			case <-t:
+				res := new(ClientResponse)
+				res.cSeq = -1
+				res.message = "ping"
+				res.payload = []string{}
+				res.sSeq = <-c.seqNum
+				resChan <- res
+			case <-stopPing:
+				return
+			}
+		}
+	}()
+	defer func() { stopPing <- true }()
 
 	for {
 		req, err := c.getRequest()
