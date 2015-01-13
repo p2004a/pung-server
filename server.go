@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,15 +49,46 @@ func (cr *ClientResponse) String() string {
 	}
 }
 
+type ConnState int
+
+const (
+	Connected ConnState = iota
+	Authenticated
+)
+
 type ConnHandler struct {
-	conn    net.Conn
-	scanner *bufio.Scanner
-	resChan chan<- *ClientResponse
-	seqNum  <-chan int
+	state     ConnState
+	conn      net.Conn
+	scanner   *bufio.Scanner
+	resChan   chan<- *ClientResponse
+	seqNum    <-chan int
+	reqMap    map[int]chan<- *ClientRequest
+	reqMapMux sync.Mutex
 }
 
 func NewConnHandler(conn net.Conn) *ConnHandler {
-	return &ConnHandler{conn: conn}
+	return &ConnHandler{
+		conn:   conn,
+		state:  Connected,
+		reqMap: make(map[int]chan<- *ClientRequest),
+	}
+}
+
+func (c *ConnHandler) responseGenerator(res *ClientResponse) <-chan *ClientRequest {
+	ch := make(chan *ClientRequest, 1)
+	c.reqMapMux.Lock()
+	defer c.reqMapMux.Unlock()
+	if _, ok := c.reqMap[res.sSeq]; ok {
+		panic("In reqMap is value that should be")
+	}
+	c.reqMap[res.sSeq] = ch
+	return ch
+}
+
+func (c *ConnHandler) removeResGen(res *ClientResponse) {
+	c.reqMapMux.Lock()
+	defer c.reqMapMux.Unlock()
+	delete(c.reqMap, res.sSeq)
 }
 
 func (c *ConnHandler) getRequest() (*ClientRequest, error) {
@@ -123,6 +156,32 @@ func sequenceGenerator(start int) <-chan int {
 	return seq
 }
 
+func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
+	res := new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = "error"
+	res.payload = []string{base64.StdEncoding.EncodeToString([]byte(msg))}
+	res.sSeq = <-c.seqNum
+	c.resChan <- res
+}
+
+func (c *ConnHandler) login(req *ClientRequest) {
+
+}
+
+func (c *ConnHandler) signup(req *ClientRequest) {
+
+}
+
+func (c *ConnHandler) ping(req *ClientRequest) {
+	res := new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = "pong"
+	res.payload = []string{}
+	res.sSeq = <-c.seqNum
+	c.resChan <- res
+}
+
 func (c *ConnHandler) Run() {
 	defer c.conn.Close()
 
@@ -151,7 +210,7 @@ func (c *ConnHandler) Run() {
 				res.message = "ping"
 				res.payload = []string{}
 				res.sSeq = <-c.seqNum
-				resChan <- res
+				c.resChan <- res
 			case <-stopPing:
 				return
 			}
@@ -168,7 +227,24 @@ func (c *ConnHandler) Run() {
 		if req == nil {
 			return
 		}
-		fmt.Print(req)
+
+		if req.message == "ping" {
+			c.ping(req)
+		} else {
+			switch c.state {
+			case Connected:
+				switch req.message {
+				case "login":
+					go c.login(req)
+				case "singup":
+					go c.signup(req)
+				default:
+					go c.errorForRequest(req, "Unknowne message in Connected state")
+				}
+			case Authenticated:
+				go c.errorForRequest(req, "Impossibru!")
+			}
+		}
 	}
 }
 
