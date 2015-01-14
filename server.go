@@ -201,15 +201,15 @@ func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
 	c.resChan <- res
 }
 
-func (c *ConnHandler) login(req *ClientRequest) {
+func (c *ConnHandler) login_procedure(req *ClientRequest) {
 
 }
 
-func (c *ConnHandler) signup(req *ClientRequest) {
+func (c *ConnHandler) signup_procedure(req *ClientRequest) {
 
 }
 
-func (c *ConnHandler) ping(req *ClientRequest) {
+func (c *ConnHandler) pong(req *ClientRequest) {
 	res := new(ClientResponse)
 	res.cSeq = req.cSeq
 	res.message = "pong"
@@ -269,15 +269,15 @@ func (c *ConnHandler) Run() {
 		}
 
 		if req.message == "ping" {
-			go c.ping(req)
+			go c.pong(req)
 		} else {
 			switch c.state {
 			case Connected:
 				switch req.message {
 				case "login":
-					go c.login(req)
+					go c.login_procedure(req)
 				case "singup":
-					go c.signup(req)
+					go c.signup_procedure(req)
 				default:
 					go c.errorForRequest(req, "Unknowne message in Connected state")
 				}
