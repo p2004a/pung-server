@@ -153,7 +153,7 @@ func (c *ConnHandler) getRequest() (*ClientRequest, error) {
 	}
 
 	req := new(ClientRequest)
-	headRE, err := regexp.Compile("^c(\\d{1,9}) (?:s(\\d{1,9}) )?([a-z_]{3,20})$")
+	headRE, err := regexp.Compile("^c(\\d{1,9}) (?:s(\\d{1,9}) )?([a-z_]{2,20})$")
 
 	if err != nil {
 		panic("Cannot compile regexp")
