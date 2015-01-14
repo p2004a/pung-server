@@ -80,7 +80,7 @@ func NewConnHandler(conn net.Conn) *ConnHandler {
 	}
 }
 
-func (c *ConnHandler) requestGenerator(res *ClientResponse, send bool) (<-chan *ClientRequest, chan<- bool) {
+func (c *ConnHandler) requestGenerator(res *ClientResponse) (<-chan *ClientRequest, chan<- bool) {
 	if res.sSeq == -1 {
 		panic("res.sSeq == -1")
 	}
@@ -94,15 +94,11 @@ func (c *ConnHandler) requestGenerator(res *ClientResponse, send bool) (<-chan *
 
 	ch := make(chan *ClientRequest, 1)
 	sendCh := make(chan bool, 2)
-	sendCh <- true
 	c.reqMap[res.sSeq] = RequestChannels{
 		ch:   ch,
 		send: sendCh,
 	}
 
-	if send {
-		c.resChan <- res
-	}
 	return ch, sendCh
 }
 
@@ -126,6 +122,16 @@ func (c *ConnHandler) handleRequestUsingReqGen(req *ClientRequest) bool {
 		}
 	}
 	return false
+}
+
+func (c *ConnHandler) sendResponse(res *ClientResponse) (err error) {
+	defer func() {
+		if x := recover(); x != nil {
+			err = errors.New("Unable to send to resChan")
+		}
+	}()
+	c.resChan <- res
+	return
 }
 
 func (c *ConnHandler) getRequest() (*ClientRequest, error) {
@@ -203,7 +209,7 @@ func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
 	res.message = "error"
 	res.payload = []string{base64.StdEncoding.EncodeToString([]byte(msg))}
 	res.sSeq = <-c.seqNum
-	c.resChan <- res
+	c.sendResponse(res)
 }
 
 func (c *ConnHandler) login_procedure(req *ClientRequest) {
@@ -222,7 +228,7 @@ func (c *ConnHandler) pong(req *ClientRequest) {
 	res.sSeq = <-c.seqNum
 	log.Print("sending pong...")
 	<-time.After(3 * time.Second)
-	c.resChan <- res
+	c.sendResponse(res)
 	log.Print("sent")
 }
 
@@ -232,7 +238,11 @@ func (c *ConnHandler) ping() {
 	res.message = "ping"
 	res.payload = []string{}
 	res.sSeq = <-c.seqNum
-	pong, _ := c.requestGenerator(res, true)
+	pong, send := c.requestGenerator(res)
+	send <- true
+	if c.sendResponse(res) != nil {
+		return
+	}
 	select {
 	case req := <-pong:
 		if req.message == "pong" {
@@ -242,7 +252,17 @@ func (c *ConnHandler) ping() {
 		}
 	case <-time.After(5 * time.Second):
 		log.Print("pong timeouted")
-		return
+	}
+	c.removeReqGen(res)
+}
+
+func (c *ConnHandler) resWriter(resChan <-chan *ClientResponse) {
+	for res := range resChan {
+		if _, err := c.conn.Write([]byte(res.String())); err != nil {
+			c.conn.Close()
+			log.Printf("Error while sending data: %s", err.Error())
+			return
+		}
 	}
 }
 
@@ -258,12 +278,7 @@ func (c *ConnHandler) Run() {
 	resChan := make(chan *ClientResponse, 100)
 	defer close(resChan)
 	c.resChan = resChan
-
-	go func() {
-		for res := range resChan {
-			c.conn.Write([]byte(res.String()))
-		}
-	}()
+	go c.resWriter(resChan)
 
 	stopPing := make(chan bool)
 	go func() {
