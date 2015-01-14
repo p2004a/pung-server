@@ -92,7 +92,7 @@ func (c *ConnHandler) responseGenerator(res *ClientResponse, send bool) (<-chan 
 	}
 
 	ch := make(chan *ClientRequest, 1)
-	sendCh := make(chan bool, 1)
+	sendCh := make(chan bool, 2)
 	sendCh <- true
 	c.reqMap[res.sSeq] = RequestChannels{
 		ch:   ch,
@@ -218,6 +218,26 @@ func (c *ConnHandler) pong(req *ClientRequest) {
 	c.resChan <- res
 }
 
+func (c *ConnHandler) ping() {
+	res := new(ClientResponse)
+	res.cSeq = -1
+	res.message = "ping"
+	res.payload = []string{}
+	res.sSeq = <-c.seqNum
+	pong, _ := c.responseGenerator(res, true)
+	select {
+	case req := <-pong:
+		if req.message == "pong" {
+			log.Print("pong")
+		} else {
+			c.errorForRequest(req, "Wrong response for ping request")
+		}
+	case <-time.After(2 * time.Second):
+		log.Print("pong timeouted")
+		return
+	}
+}
+
 func (c *ConnHandler) Run() {
 	defer c.conn.Close()
 
@@ -241,12 +261,7 @@ func (c *ConnHandler) Run() {
 		for {
 			select {
 			case <-t:
-				res := new(ClientResponse)
-				res.cSeq = -1
-				res.message = "ping"
-				res.payload = []string{}
-				res.sSeq = <-c.seqNum
-				c.resChan <- res
+				go c.ping()
 			case <-stopPing:
 				return
 			}
