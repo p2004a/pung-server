@@ -232,6 +232,51 @@ func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
 	c.sendResponse(res)
 }
 
+func (c *ConnHandler) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*ClientRequest, error) {
+	hash := sha256.New()
+	secret := []byte("Hello")
+	encrypted, err := rsa.EncryptOAEP(hash, rand.Reader, key, secret, []byte("verification"))
+	if err != nil {
+		return req, errors.New("Failed to encrypt secret")
+	}
+
+	res := new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = "decrypt"
+	res.payload = []string{base64.StdEncoding.EncodeToString(encrypted)}
+	res.sSeq = <-c.seqNum
+
+	req, err = c.singleRequest(res, 1*time.Second)
+	if err != nil {
+		return nil, nil
+	}
+	if req.message != "check" || len(req.payload) != 1 {
+		return req, errors.New("Wrong request for decrypt response")
+	}
+	secretToCheck, err := base64.StdEncoding.DecodeString(req.payload[0])
+	if err != nil {
+		return req, errors.New("Decoded secret payload was not valid base64")
+	}
+
+	if !bytes.Equal(secretToCheck, secret) {
+		return req, errors.New("Wrong answer for check")
+	}
+
+	return req, nil
+}
+
+func rsaPublicKeyFromDER(der []byte) (*rsa.PublicKey, error) {
+	genericKey, err := x509.ParsePKIXPublicKey(der)
+	if err != nil {
+		return nil, errors.New("Cannot parse public key")
+	}
+	key, ok := genericKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("Key wasn't the rsa public key")
+	}
+	return key, nil
+}
+
 func (c *ConnHandler) loginProcedure(req *ClientRequest) {
 	c.errorForRequest(req, "not implemented yet")
 }
@@ -247,14 +292,9 @@ func (c *ConnHandler) signupProcedure(req *ClientRequest) {
 		c.errorForRequest(req, "Key was not valid base64")
 		return
 	}
-	genericKey, err := x509.ParsePKIXPublicKey(keyBuff)
+	key, err := rsaPublicKeyFromDER(keyBuff)
 	if err != nil {
-		c.errorForRequest(req, "Cannot parse public key")
-		return
-	}
-	key, ok := genericKey.(*rsa.PublicKey)
-	if !ok {
-		c.errorForRequest(req, "Sent key wasn't the rsa public key")
+		c.errorForRequest(req, "Cannot parse key")
 		return
 	}
 	login := req.payload[0]
@@ -263,40 +303,15 @@ func (c *ConnHandler) signupProcedure(req *ClientRequest) {
 		return
 	}
 
-	hash := sha256.New()
-	secret := []byte("Hello")
-	encrypted, err := rsa.EncryptOAEP(hash, rand.Reader, key, secret, []byte("verification"))
+	req, err = c.verifyKey(req, key)
 	if err != nil {
-		c.errorForRequest(req, "Failed to encrypt secret")
+		c.errorForRequest(req, err.Error())
+	}
+	if req == nil {
 		return
 	}
 
 	res := new(ClientResponse)
-	res.cSeq = req.cSeq
-	res.message = "decrypt"
-	res.payload = []string{base64.StdEncoding.EncodeToString(encrypted)}
-	res.sSeq = <-c.seqNum
-
-	req, err = c.singleRequest(res, 1*time.Second)
-	if err != nil {
-		return
-	}
-	if req.message != "check" || len(req.payload) != 1 {
-		c.errorForRequest(req, "Wrong request for decrypt response")
-		return
-	}
-	secretToCheck, err := base64.StdEncoding.DecodeString(req.payload[0])
-	if err != nil {
-		c.errorForRequest(req, "Decoded secret payload was not valid base64")
-		return
-	}
-
-	if !bytes.Equal(secretToCheck, secret) {
-		c.errorForRequest(req, "Wrong answer for check")
-		return
-	}
-
-	res = new(ClientResponse)
 	res.cSeq = req.cSeq
 	res.message = "ok"
 	res.payload = []string{}
