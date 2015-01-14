@@ -213,11 +213,11 @@ func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
 }
 
 func (c *ConnHandler) login_procedure(req *ClientRequest) {
-
+	c.errorForRequest(req, "not implemented yet")
 }
 
 func (c *ConnHandler) signup_procedure(req *ClientRequest) {
-
+	c.errorForRequest(req, "not implemented yet")
 }
 
 func (c *ConnHandler) pong(req *ClientRequest) {
@@ -263,6 +263,7 @@ func (c *ConnHandler) resWriter(resChan <-chan *ClientResponse) {
 
 func (c *ConnHandler) Run() {
 	defer c.conn.Close()
+	defer log.Printf("Connection closed")
 
 	c.scanner = bufio.NewScanner(c.conn)
 
@@ -311,7 +312,7 @@ func (c *ConnHandler) Run() {
 				switch req.message {
 				case "login":
 					go c.login_procedure(req)
-				case "singup":
+				case "signup":
 					go c.signup_procedure(req)
 				default:
 					go c.errorForRequest(req, "Unknowne message in Connected state")
