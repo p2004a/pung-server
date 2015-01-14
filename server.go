@@ -2,7 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -134,6 +139,21 @@ func (c *ConnHandler) sendResponse(res *ClientResponse) (err error) {
 	return
 }
 
+func (c *ConnHandler) singleRequest(res *ClientResponse, timeout time.Duration) (*ClientRequest, error) {
+	check, send := c.requestGenerator(res)
+	defer c.removeReqGen(res)
+	send <- true
+	if err := c.sendResponse(res); err != nil {
+		return nil, err
+	}
+	select {
+	case req := <-check:
+		return req, nil
+	case <-time.After(2 * time.Second):
+		return nil, errors.New("timeouted waiting for request")
+	}
+}
+
 func (c *ConnHandler) getRequest() (*ClientRequest, error) {
 	var lines [2]string
 	var i int
@@ -212,12 +232,78 @@ func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
 	c.sendResponse(res)
 }
 
-func (c *ConnHandler) login_procedure(req *ClientRequest) {
+func (c *ConnHandler) loginProcedure(req *ClientRequest) {
 	c.errorForRequest(req, "not implemented yet")
 }
 
-func (c *ConnHandler) signup_procedure(req *ClientRequest) {
-	c.errorForRequest(req, "not implemented yet")
+func (c *ConnHandler) signupProcedure(req *ClientRequest) {
+	if len(req.payload) != 2 {
+		c.errorForRequest(req, "Incorrect singnup payload")
+		return
+	}
+
+	keyBuff, err := base64.StdEncoding.DecodeString(req.payload[1])
+	if err != nil {
+		c.errorForRequest(req, "Key was not valid base64")
+		return
+	}
+	genericKey, err := x509.ParsePKIXPublicKey(keyBuff)
+	if err != nil {
+		c.errorForRequest(req, "Cannot parse public key")
+		return
+	}
+	key, ok := genericKey.(*rsa.PublicKey)
+	if !ok {
+		c.errorForRequest(req, "Sent key wasn't the rsa public key")
+		return
+	}
+	login := req.payload[0]
+	if len(login) < 3 {
+		c.errorForRequest(req, "Login must be at least 3 charactest long")
+		return
+	}
+
+	hash := sha256.New()
+	secret := []byte("Hello")
+	encrypted, err := rsa.EncryptOAEP(hash, rand.Reader, key, secret, []byte("verification"))
+	if err != nil {
+		c.errorForRequest(req, "Failed to encrypt secret")
+		return
+	}
+
+	res := new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = "decrypt"
+	res.payload = []string{base64.StdEncoding.EncodeToString(encrypted)}
+	res.sSeq = <-c.seqNum
+
+	req, err = c.singleRequest(res, 1*time.Second)
+	if err != nil {
+		return
+	}
+	if req.message != "check" || len(req.payload) != 1 {
+		c.errorForRequest(req, "Wrong request for decrypt response")
+		return
+	}
+	secretToCheck, err := base64.StdEncoding.DecodeString(req.payload[0])
+	if err != nil {
+		c.errorForRequest(req, "Decoded secret payload was not valid base64")
+		return
+	}
+
+	if !bytes.Equal(secretToCheck, secret) {
+		c.errorForRequest(req, "Wrong answer for check")
+		return
+	}
+
+	res = new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = "ok"
+	res.payload = []string{}
+	res.sSeq = <-c.seqNum
+	c.sendResponse(res)
+
+	c.state = Authenticated
 }
 
 func (c *ConnHandler) pong(req *ClientRequest) {
@@ -311,9 +397,9 @@ func (c *ConnHandler) Run() {
 			case Connected:
 				switch req.message {
 				case "login":
-					go c.login_procedure(req)
+					go c.loginProcedure(req)
 				case "signup":
-					go c.signup_procedure(req)
+					go c.signupProcedure(req)
 				default:
 					go c.errorForRequest(req, "Unknowne message in Connected state")
 				}
