@@ -99,7 +99,7 @@ func main() {
 			os.Exit(2)
 		}
 		log.Printf("Connection from: %s", conn.RemoteAddr().String())
-		handler := NewConnHandler(conn)
+		handler := NewClientConnHandl(conn)
 		go handler.Run()
 	}
 }

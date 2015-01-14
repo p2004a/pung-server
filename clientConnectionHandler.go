@@ -49,10 +49,10 @@ func (cr *ClientResponse) String() string {
 	}
 }
 
-type ConnState int
+type ClientConnState int
 
 const (
-	Connected ConnState = iota
+	Connected ClientConnState = iota
 	Authenticated
 )
 
@@ -61,8 +61,8 @@ type RequestChannels struct {
 	send chan bool
 }
 
-type ConnHandler struct {
-	state     ConnState
+type ClientConnHandl struct {
+	state     ClientConnState
 	conn      net.Conn
 	scanner   *bufio.Scanner
 	resChan   chan<- *ClientResponse
@@ -71,15 +71,15 @@ type ConnHandler struct {
 	reqMapMux sync.Mutex
 }
 
-func NewConnHandler(conn net.Conn) *ConnHandler {
-	return &ConnHandler{
+func NewClientConnHandl(conn net.Conn) *ClientConnHandl {
+	return &ClientConnHandl{
 		conn:   conn,
 		state:  Connected,
 		reqMap: make(map[int]RequestChannels),
 	}
 }
 
-func (c *ConnHandler) requestGenerator(res *ClientResponse) (<-chan *ClientRequest, chan<- bool) {
+func (c *ClientConnHandl) requestGenerator(res *ClientResponse) (<-chan *ClientRequest, chan<- bool) {
 	if res.sSeq == -1 {
 		panic("res.sSeq == -1")
 	}
@@ -101,7 +101,7 @@ func (c *ConnHandler) requestGenerator(res *ClientResponse) (<-chan *ClientReque
 	return ch, sendCh
 }
 
-func (c *ConnHandler) removeReqGen(res *ClientResponse) {
+func (c *ClientConnHandl) removeReqGen(res *ClientResponse) {
 	c.reqMapMux.Lock()
 	if rc, ok := c.reqMap[res.sSeq]; ok {
 		delete(c.reqMap, res.sSeq)
@@ -110,7 +110,7 @@ func (c *ConnHandler) removeReqGen(res *ClientResponse) {
 	c.reqMapMux.Unlock()
 }
 
-func (c *ConnHandler) handleRequestUsingReqGen(req *ClientRequest) bool {
+func (c *ClientConnHandl) handleRequestUsingReqGen(req *ClientRequest) bool {
 	c.reqMapMux.Lock()
 	cr, ok := c.reqMap[req.sSeq]
 	c.reqMapMux.Unlock()
@@ -123,7 +123,7 @@ func (c *ConnHandler) handleRequestUsingReqGen(req *ClientRequest) bool {
 	return false
 }
 
-func (c *ConnHandler) sendResponse(res *ClientResponse) (err error) {
+func (c *ClientConnHandl) sendResponse(res *ClientResponse) (err error) {
 	defer func() {
 		if x := recover(); x != nil {
 			err = errors.New("Unable to send to resChan")
@@ -133,7 +133,7 @@ func (c *ConnHandler) sendResponse(res *ClientResponse) (err error) {
 	return
 }
 
-func (c *ConnHandler) singleRequest(res *ClientResponse, timeout time.Duration) (*ClientRequest, error) {
+func (c *ClientConnHandl) singleRequest(res *ClientResponse, timeout time.Duration) (*ClientRequest, error) {
 	check, send := c.requestGenerator(res)
 	defer c.removeReqGen(res)
 	send <- true
@@ -148,7 +148,7 @@ func (c *ConnHandler) singleRequest(res *ClientResponse, timeout time.Duration) 
 	}
 }
 
-func (c *ConnHandler) getRequest() (*ClientRequest, error) {
+func (c *ClientConnHandl) getRequest() (*ClientRequest, error) {
 	var lines [2]string
 	var i int
 
@@ -201,7 +201,7 @@ func (c *ConnHandler) getRequest() (*ClientRequest, error) {
 	return req, nil
 }
 
-func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
+func (c *ClientConnHandl) errorForRequest(req *ClientRequest, msg string) {
 	res := new(ClientResponse)
 	res.cSeq = req.cSeq
 	res.message = "error"
@@ -210,7 +210,7 @@ func (c *ConnHandler) errorForRequest(req *ClientRequest, msg string) {
 	c.sendResponse(res)
 }
 
-func (c *ConnHandler) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*ClientRequest, error) {
+func (c *ClientConnHandl) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*ClientRequest, error) {
 	hash := sha256.New()
 	secret := []byte("Hello")
 	encrypted, err := rsa.EncryptOAEP(hash, rand.Reader, key, secret, []byte("verification"))
@@ -243,11 +243,11 @@ func (c *ConnHandler) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*Client
 	return req, nil
 }
 
-func (c *ConnHandler) loginProcedure(req *ClientRequest) {
+func (c *ClientConnHandl) loginProcedure(req *ClientRequest) {
 	c.errorForRequest(req, "not implemented yet")
 }
 
-func (c *ConnHandler) signupProcedure(req *ClientRequest) {
+func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 	if len(req.payload) != 2 {
 		c.errorForRequest(req, "Incorrect singnup payload")
 		return
@@ -287,7 +287,7 @@ func (c *ConnHandler) signupProcedure(req *ClientRequest) {
 	c.state = Authenticated
 }
 
-func (c *ConnHandler) pong(req *ClientRequest) {
+func (c *ClientConnHandl) pong(req *ClientRequest) {
 	res := new(ClientResponse)
 	res.cSeq = req.cSeq
 	res.message = "pong"
@@ -296,7 +296,7 @@ func (c *ConnHandler) pong(req *ClientRequest) {
 	c.sendResponse(res)
 }
 
-func (c *ConnHandler) ping() {
+func (c *ClientConnHandl) ping() {
 	res := new(ClientResponse)
 	res.cSeq = -1
 	res.message = "ping"
@@ -318,7 +318,7 @@ func (c *ConnHandler) ping() {
 	c.removeReqGen(res)
 }
 
-func (c *ConnHandler) resWriter(resChan <-chan *ClientResponse) {
+func (c *ClientConnHandl) resWriter(resChan <-chan *ClientResponse) {
 	for res := range resChan {
 		if _, err := c.conn.Write([]byte(res.String())); err != nil {
 			c.conn.Close()
@@ -328,7 +328,7 @@ func (c *ConnHandler) resWriter(resChan <-chan *ClientResponse) {
 	}
 }
 
-func (c *ConnHandler) Run() {
+func (c *ClientConnHandl) Run() {
 	defer c.conn.Close()
 	defer log.Printf("Connection closed")
 
