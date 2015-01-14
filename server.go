@@ -56,13 +56,18 @@ const (
 	Authenticated
 )
 
+type RequestChannels struct {
+	ch   chan<- *ClientRequest
+	send chan bool
+}
+
 type ConnHandler struct {
 	state     ConnState
 	conn      net.Conn
 	scanner   *bufio.Scanner
 	resChan   chan<- *ClientResponse
 	seqNum    <-chan int
-	reqMap    map[int]chan<- *ClientRequest
+	reqMap    map[int]RequestChannels
 	reqMapMux sync.Mutex
 }
 
@@ -70,25 +75,56 @@ func NewConnHandler(conn net.Conn) *ConnHandler {
 	return &ConnHandler{
 		conn:   conn,
 		state:  Connected,
-		reqMap: make(map[int]chan<- *ClientRequest),
+		reqMap: make(map[int]RequestChannels),
 	}
 }
 
-func (c *ConnHandler) responseGenerator(res *ClientResponse) <-chan *ClientRequest {
-	ch := make(chan *ClientRequest, 1)
+func (c *ConnHandler) responseGenerator(res *ClientResponse, send bool) (<-chan *ClientRequest, chan<- bool) {
+	if res.sSeq == -1 {
+		panic("res.sSeq == -1")
+	}
+
 	c.reqMapMux.Lock()
 	defer c.reqMapMux.Unlock()
+
 	if _, ok := c.reqMap[res.sSeq]; ok {
-		panic("In reqMap is value that should be")
+		panic("In reqMap is value that shouldn't be")
 	}
-	c.reqMap[res.sSeq] = ch
-	return ch
+
+	ch := make(chan *ClientRequest, 1)
+	sendCh := make(chan bool, 1)
+	sendCh <- true
+	c.reqMap[res.sSeq] = RequestChannels{
+		ch:   ch,
+		send: sendCh,
+	}
+
+	if send {
+		c.resChan <- res
+	}
+	return ch, sendCh
 }
 
 func (c *ConnHandler) removeResGen(res *ClientResponse) {
 	c.reqMapMux.Lock()
-	defer c.reqMapMux.Unlock()
-	delete(c.reqMap, res.sSeq)
+	if rc, ok := c.reqMap[res.sSeq]; ok {
+		delete(c.reqMap, res.sSeq)
+		rc.send <- false
+	}
+	c.reqMapMux.Unlock()
+}
+
+func (c *ConnHandler) handleRequestUsingResGen(req *ClientRequest) bool {
+	c.reqMapMux.Lock()
+	cr, ok := c.reqMap[req.sSeq]
+	c.reqMapMux.Unlock()
+	if ok {
+		if <-cr.send {
+			cr.ch <- req
+			return true
+		}
+	}
+	return false
 }
 
 func (c *ConnHandler) getRequest() (*ClientRequest, error) {
@@ -228,8 +264,12 @@ func (c *ConnHandler) Run() {
 			return
 		}
 
+		if c.handleRequestUsingResGen(req) {
+			continue
+		}
+
 		if req.message == "ping" {
-			c.ping(req)
+			go c.ping(req)
 		} else {
 			switch c.state {
 			case Connected:
