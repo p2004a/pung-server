@@ -226,7 +226,6 @@ func (c *ConnHandler) pong(req *ClientRequest) {
 	res.message = "pong"
 	res.payload = []string{}
 	res.sSeq = <-c.seqNum
-	<-time.After(3 * time.Second)
 	c.sendResponse(res)
 }
 
