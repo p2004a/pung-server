@@ -226,10 +226,8 @@ func (c *ConnHandler) pong(req *ClientRequest) {
 	res.message = "pong"
 	res.payload = []string{}
 	res.sSeq = <-c.seqNum
-	log.Print("sending pong...")
 	<-time.After(3 * time.Second)
 	c.sendResponse(res)
-	log.Print("sent")
 }
 
 func (c *ConnHandler) ping() {
@@ -245,9 +243,7 @@ func (c *ConnHandler) ping() {
 	}
 	select {
 	case req := <-pong:
-		if req.message == "pong" {
-			log.Print("pong")
-		} else {
+		if req.message != "pong" {
 			c.errorForRequest(req, "Wrong response for ping request")
 		}
 	case <-time.After(5 * time.Second):
