@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -331,7 +332,21 @@ func loadServerConfiguration(configFile string) (conf ServerConfiguration, err e
 func main() {
 	var configFile string
 	flag.StringVar(&configFile, "config", "config.json", "server configuration file")
+
+	var printNumGoroutine bool
+	flag.BoolVar(&printNumGoroutine, "numgoroutine", false, "prints periodicaly number of running goroutines")
+
 	flag.Parse()
+
+	if printNumGoroutine {
+		go func() {
+			t := time.Tick(2 * time.Second)
+			for {
+				<-t
+				log.Print(runtime.NumGoroutine())
+			}
+		}()
+	}
 
 	config, err := loadServerConfiguration(configFile)
 	if err != nil {
