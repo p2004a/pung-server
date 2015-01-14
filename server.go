@@ -80,7 +80,7 @@ func NewConnHandler(conn net.Conn) *ConnHandler {
 	}
 }
 
-func (c *ConnHandler) responseGenerator(res *ClientResponse, send bool) (<-chan *ClientRequest, chan<- bool) {
+func (c *ConnHandler) requestGenerator(res *ClientResponse, send bool) (<-chan *ClientRequest, chan<- bool) {
 	if res.sSeq == -1 {
 		panic("res.sSeq == -1")
 	}
@@ -106,7 +106,7 @@ func (c *ConnHandler) responseGenerator(res *ClientResponse, send bool) (<-chan 
 	return ch, sendCh
 }
 
-func (c *ConnHandler) removeResGen(res *ClientResponse) {
+func (c *ConnHandler) removeReqGen(res *ClientResponse) {
 	c.reqMapMux.Lock()
 	if rc, ok := c.reqMap[res.sSeq]; ok {
 		delete(c.reqMap, res.sSeq)
@@ -115,7 +115,7 @@ func (c *ConnHandler) removeResGen(res *ClientResponse) {
 	c.reqMapMux.Unlock()
 }
 
-func (c *ConnHandler) handleRequestUsingResGen(req *ClientRequest) bool {
+func (c *ConnHandler) handleRequestUsingReqGen(req *ClientRequest) bool {
 	c.reqMapMux.Lock()
 	cr, ok := c.reqMap[req.sSeq]
 	c.reqMapMux.Unlock()
@@ -220,7 +220,10 @@ func (c *ConnHandler) pong(req *ClientRequest) {
 	res.message = "pong"
 	res.payload = []string{}
 	res.sSeq = <-c.seqNum
+	log.Print("sending pong...")
+	<-time.After(3 * time.Second)
 	c.resChan <- res
+	log.Print("sent")
 }
 
 func (c *ConnHandler) ping() {
@@ -229,7 +232,7 @@ func (c *ConnHandler) ping() {
 	res.message = "ping"
 	res.payload = []string{}
 	res.sSeq = <-c.seqNum
-	pong, _ := c.responseGenerator(res, true)
+	pong, _ := c.requestGenerator(res, true)
 	select {
 	case req := <-pong:
 		if req.message == "pong" {
@@ -237,7 +240,7 @@ func (c *ConnHandler) ping() {
 		} else {
 			c.errorForRequest(req, "Wrong response for ping request")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		log.Print("pong timeouted")
 		return
 	}
@@ -286,7 +289,7 @@ func (c *ConnHandler) Run() {
 			return
 		}
 
-		if c.handleRequestUsingResGen(req) {
+		if c.handleRequestUsingReqGen(req) {
 			continue
 		}
 
