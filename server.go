@@ -181,12 +181,16 @@ func (c *ConnHandler) getRequest() (*ClientRequest, error) {
 	return req, nil
 }
 
-func sequenceGenerator(start int) <-chan int {
+func sequenceGenerator(start int, end <-chan bool) <-chan int {
 	seq := make(chan int, 10)
 
 	go func() {
 		for i := start; ; i++ {
-			seq <- i
+			select {
+			case seq <- i:
+			case <-end:
+				return
+			}
 		}
 	}()
 
@@ -244,7 +248,9 @@ func (c *ConnHandler) Run() {
 
 	c.scanner = bufio.NewScanner(c.conn)
 
-	c.seqNum = sequenceGenerator(1)
+	seqEnd := make(chan bool)
+	c.seqNum = sequenceGenerator(1, seqEnd)
+	defer func() { seqEnd <- true }()
 
 	resChan := make(chan *ClientResponse, 100)
 	defer close(resChan)
