@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"github.com/p2004a/pung-server/users"
 	"log"
 	"os"
 	"runtime"
@@ -17,6 +18,9 @@ type ServerConfiguration struct {
 	CertFile   string
 	KeyFile    string
 }
+
+var userSet *users.UserSet
+var serverConfig ServerConfiguration
 
 func loadServerConfiguration(configFile string) (conf ServerConfiguration, err error) {
 	file, err := os.Open(configFile)
@@ -60,12 +64,15 @@ func main() {
 		log.Fatal(err)
 		os.Exit(1)
 	}
+	serverConfig = config
 
 	serverCert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
 	if err != nil {
 		log.Fatal(err)
 		os.Exit(1)
 	}
+
+	userSet = users.NewUserSet(config.ServerName)
 
 	tlsConfig := tls.Config{
 		Certificates:       []tls.Certificate{serverCert},
