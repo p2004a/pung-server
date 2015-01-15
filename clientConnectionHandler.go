@@ -70,6 +70,7 @@ type ClientConnHandl struct {
 	seqNum    <-chan int
 	reqMap    map[int]RequestChannels
 	reqMapMux sync.Mutex
+	user      *users.User
 }
 
 func NewClientConnHandl(conn net.Conn) *ClientConnHandl {
@@ -149,6 +150,15 @@ func (c *ClientConnHandl) singleRequest(res *ClientResponse, timeout time.Durati
 	}
 }
 
+func (c *ClientConnHandl) simpleResponse(req *ClientRequest, message string, payload ...string) {
+	res := new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = message
+	res.payload = payload
+	res.sSeq = <-c.seqNum
+	c.sendResponse(res)
+}
+
 func (c *ClientConnHandl) getRequest() (*ClientRequest, error) {
 	var lines [2]string
 	var i int
@@ -203,12 +213,7 @@ func (c *ClientConnHandl) getRequest() (*ClientRequest, error) {
 }
 
 func (c *ClientConnHandl) errorForRequest(req *ClientRequest, msg string) {
-	res := new(ClientResponse)
-	res.cSeq = req.cSeq
-	res.message = "error"
-	res.payload = []string{base64.StdEncoding.EncodeToString([]byte(msg))}
-	res.sSeq = <-c.seqNum
-	c.sendResponse(res)
+	c.simpleResponse(req, "error", base64.StdEncoding.EncodeToString([]byte(msg)))
 }
 
 func (c *ClientConnHandl) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*ClientRequest, error) {
@@ -268,13 +273,9 @@ func (c *ClientConnHandl) loginProcedure(req *ClientRequest) {
 		return
 	}
 
-	res := new(ClientResponse)
-	res.cSeq = req.cSeq
-	res.message = "ok"
-	res.payload = []string{}
-	res.sSeq = <-c.seqNum
-	c.sendResponse(res)
+	c.simpleResponse(req, "ok")
 
+	c.user = user
 	c.state = Authenticated
 }
 
@@ -320,23 +321,10 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 
 	user.Key = key
 
-	res := new(ClientResponse)
-	res.cSeq = req.cSeq
-	res.message = "ok"
-	res.payload = []string{}
-	res.sSeq = <-c.seqNum
-	c.sendResponse(res)
+	c.simpleResponse(req, "ok")
 
+	c.user = user
 	c.state = Authenticated
-}
-
-func (c *ClientConnHandl) pong(req *ClientRequest) {
-	res := new(ClientResponse)
-	res.cSeq = req.cSeq
-	res.message = "pong"
-	res.payload = []string{}
-	res.sSeq = <-c.seqNum
-	c.sendResponse(res)
 }
 
 func (c *ClientConnHandl) ping() {
@@ -415,7 +403,7 @@ func (c *ClientConnHandl) Run() {
 		}
 
 		if req.message == "ping" {
-			go c.pong(req)
+			go c.simpleResponse(req, "pong")
 		} else {
 			switch c.state {
 			case Connected:
