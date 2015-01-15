@@ -280,9 +280,11 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 
 	req, err = c.verifyKey(req, key)
 	if err != nil {
+		userSet.RemoveUser(user)
 		c.errorForRequest(req, err.Error())
 	}
 	if req == nil {
+		userSet.RemoveUser(user)
 		return
 	}
 
