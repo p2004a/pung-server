@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/p2004a/pung-server/users"
 	"log"
 	"net"
 	"regexp"
@@ -269,6 +270,14 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 		return
 	}
 
+	user := users.NewUser()
+	user.Name = login
+	user.Host = serverConfig.ServerName
+	user.Key = nil
+	if !userSet.AddUser(user) {
+		c.errorForRequest(req, "There exists user with this name")
+	}
+
 	req, err = c.verifyKey(req, key)
 	if err != nil {
 		c.errorForRequest(req, err.Error())
@@ -276,6 +285,8 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 	if req == nil {
 		return
 	}
+
+	user.Key = key
 
 	res := new(ClientResponse)
 	res.cSeq = req.cSeq
