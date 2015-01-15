@@ -327,6 +327,11 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 	c.state = Authenticated
 }
 
+func (c *ClientConnHandl) logoutProcedure() {
+	c.user = nil
+	c.state = Connected
+}
+
 func (c *ClientConnHandl) ping() {
 	res := new(ClientResponse)
 	res.cSeq = -1
@@ -416,7 +421,12 @@ func (c *ClientConnHandl) Run() {
 					go c.errorForRequest(req, "Unknowne message in Connected state")
 				}
 			case Authenticated:
-				go c.errorForRequest(req, "Impossibru!")
+				switch req.message {
+				case "logout":
+					go c.logoutProcedure(req)
+				default:
+					go c.errorForRequest(req, "Unknowne message in Authenticated state")
+				}
 			}
 		}
 	}
