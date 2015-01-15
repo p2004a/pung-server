@@ -245,7 +245,37 @@ func (c *ClientConnHandl) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*Cl
 }
 
 func (c *ClientConnHandl) loginProcedure(req *ClientRequest) {
-	c.errorForRequest(req, "not implemented yet")
+	if len(req.payload) != 1 {
+		c.errorForRequest(req, "Incorrect login payload")
+		return
+	}
+
+	user := userSet.GetUser(req.payload[0])
+	if user == nil {
+		c.errorForRequest(req, "There is no user with requested login")
+		return
+	}
+	if user.Key == nil {
+		c.errorForRequest(req, "Cannot login to account without verified key")
+		return
+	}
+
+	req, err := c.verifyKey(req, user.Key)
+	if err != nil {
+		c.errorForRequest(req, err.Error())
+	}
+	if req == nil {
+		return
+	}
+
+	res := new(ClientResponse)
+	res.cSeq = req.cSeq
+	res.message = "ok"
+	res.payload = []string{}
+	res.sSeq = <-c.seqNum
+	c.sendResponse(res)
+
+	c.state = Authenticated
 }
 
 func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
