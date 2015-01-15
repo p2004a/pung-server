@@ -423,7 +423,7 @@ func (c *ClientConnHandl) Run() {
 			case Authenticated:
 				switch req.message {
 				case "logout":
-					go c.logoutProcedure(req)
+					go c.logoutProcedure()
 				default:
 					go c.errorForRequest(req, "Unknowne message in Authenticated state")
 				}
