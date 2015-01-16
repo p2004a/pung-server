@@ -218,7 +218,11 @@ func (c *ClientConnHandl) errorForRequest(req *ClientRequest, msg string) {
 
 func (c *ClientConnHandl) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*ClientRequest, error) {
 	hash := sha256.New()
-	secret := []byte("Hello")
+	secret := make([]byte, 32)
+	_, err := rand.Reader.Read(secret)
+	if err != nil {
+		panic("Cannot get numers form random generator")
+	}
 	encrypted, err := rsa.EncryptOAEP(hash, rand.Reader, key, secret, []byte("verification"))
 	if err != nil {
 		return req, errors.New("Failed to encrypt secret")
