@@ -296,8 +296,17 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 		return
 	}
 	login := req.payload[0]
-	if len(login) < 3 {
-		c.errorForRequest(req, "Login must be at least 3 charactest long")
+	if len(login) < 3 || len(login) > 20 {
+		c.errorForRequest(req, "Login must be between 3 and 20 characters long")
+		return
+	}
+
+	loginRE, err := regexp.Compile("^[a-z][a-z_0-9]{2,19}$")
+	if err != nil {
+		panic("Cannot compile regexp")
+	}
+	if !loginRE.MatchString(login) {
+		c.errorForRequest(req, "Login can consist only of alphanumerics and underscores")
 		return
 	}
 
