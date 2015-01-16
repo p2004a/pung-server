@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/p2004a/pung-server/users"
+	"io"
 	"log"
 	"net"
 	"regexp"
@@ -65,7 +66,7 @@ type RequestChannels struct {
 type ClientConnHandl struct {
 	state     ClientConnState
 	conn      net.Conn
-	scanner   *bufio.Scanner
+	reader    *bufio.Reader
 	resChan   chan<- *ClientResponse
 	seqNum    <-chan int
 	reqMap    map[int]RequestChannels
@@ -163,13 +164,17 @@ func (c *ClientConnHandl) getRequest() (*ClientRequest, error) {
 	var lines [2]string
 	var i int
 
-	for i = 0; i < 2 && c.scanner.Scan(); i++ {
-		lines[i] = c.scanner.Text()
+	for i = 0; i < 2; i++ {
+		buf, err := c.reader.ReadSlice(byte('\n'))
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		lines[i] = string(buf[0 : len(buf)-1])
 	}
 
-	if err := c.scanner.Err(); err != nil {
-		return nil, err
-	}
 	switch i {
 	case 0:
 		return nil, nil
@@ -381,7 +386,8 @@ func (c *ClientConnHandl) Run() {
 	defer c.conn.Close()
 	defer log.Printf("Connection closed")
 
-	c.scanner = bufio.NewScanner(c.conn)
+	// buffer with 100KB -> max size of single message from user = 100KB
+	c.reader = bufio.NewReaderSize(c.conn, 100*1024)
 
 	seqEnd := make(chan bool)
 	c.seqNum = sequenceGenerator(1, seqEnd)
