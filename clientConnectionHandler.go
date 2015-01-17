@@ -157,13 +157,13 @@ func (c *ClientConnHandl) singleRequest(res *ClientResponse, timeout time.Durati
 	}
 }
 
-func (c *ClientConnHandl) simpleResponse(req *ClientRequest, message string, payload ...string) {
+func (c *ClientConnHandl) simpleResponse(req *ClientRequest, message string, payload ...string) error {
 	res := new(ClientResponse)
 	res.cSeq = req.cSeq
 	res.message = message
 	res.payload = payload
 	res.sSeq = <-c.seqNum
-	c.sendResponse(res)
+	return c.sendResponse(res)
 }
 
 func (c *ClientConnHandl) getRequest() (*ClientRequest, error) {
@@ -389,7 +389,24 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) getFriendsProcedure(req *ClientRequest) {
-	c.errorForRequest(req, "Not implemented")
+	if len(req.payload) != 0 {
+		c.errorForRequest(req, "Incorrect payload")
+		return
+	}
+
+	friends := userSet.GetFriends(c.user)
+
+	for _, friend := range friends {
+		buf, err := rsaPublicKeyToDER(friend.Key)
+		if err != nil {
+			panic("cannot create der from pubkey")
+		}
+		keyStr := base64.StdEncoding.EncodeToString(buf)
+		err = c.simpleResponse(req, "friend", friend.FullId(), keyStr)
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {

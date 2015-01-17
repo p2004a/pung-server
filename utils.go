@@ -33,3 +33,8 @@ func rsaPublicKeyFromDER(der []byte) (*rsa.PublicKey, error) {
 	}
 	return key, nil
 }
+
+func rsaPublicKeyToDER(pub *rsa.PublicKey) ([]byte, error) {
+	buf, err := x509.MarshalPKIXPublicKey(pub)
+	return buf, err
+}

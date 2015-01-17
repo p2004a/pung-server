@@ -14,7 +14,7 @@ type User struct {
 	Key  *rsa.PublicKey
 }
 
-func (u *User) fullId() string {
+func (u *User) FullId() string {
 	return u.Name + "@" + u.Host
 }
 
@@ -65,11 +65,11 @@ func (s *UserSet) AddUser(user *User) bool {
 	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if _, ok := s.usersNameHost[user.fullId()]; ok {
+	if _, ok := s.usersNameHost[user.FullId()]; ok {
 		return false
 	}
 	user.id = s.newId()
-	s.usersNameHost[user.fullId()] = user
+	s.usersNameHost[user.FullId()] = user
 	s.usersId[user.id] = user
 	s.friends[user.id] = []*User{}
 	return true
@@ -86,7 +86,7 @@ func (s *UserSet) RemoveUser(user *User) bool {
 	}
 	delete(s.usersId, user.id)
 	delete(s.friends, user.id)
-	delete(s.usersNameHost, user.fullId())
+	delete(s.usersNameHost, user.FullId())
 	user.id = -1
 	return true
 }
@@ -100,4 +100,10 @@ func (s *UserSet) GetUser(username string) *User {
 
 func (s *UserSet) SendFriendshipRequest(from, to *User) {
 
+}
+
+func (s *UserSet) GetFriends(user *User) []*User {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return s.friends[user.id]
 }
