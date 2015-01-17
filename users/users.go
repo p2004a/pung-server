@@ -97,3 +97,7 @@ func (s *UserSet) GetUser(username string) *User {
 	defer s.lock.RUnlock()
 	return s.usersNameHost[name+"@"+host]
 }
+
+func (s *UserSet) SendFriendshipRequest(from, to *User) {
+
+}

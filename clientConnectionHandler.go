@@ -72,13 +72,19 @@ type ClientConnHandl struct {
 	reqMap    map[int]RequestChannels
 	reqMapMux sync.Mutex
 	user      *users.User
+	pungRE    *regexp.Regexp
 }
 
 func NewClientConnHandl(conn net.Conn) *ClientConnHandl {
+	pungRE, err := regexp.Compile("^([a-z][a-z_0-9]{2,19})@((?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9]))$")
+	if err != nil {
+		panic("incorrect pungRE reqular expresion")
+	}
 	return &ClientConnHandl{
 		conn:   conn,
 		state:  Connected,
 		reqMap: make(map[int]RequestChannels),
+		pungRE: pungRE,
 	}
 }
 
@@ -350,6 +356,50 @@ func (c *ClientConnHandl) logoutProcedure() {
 	c.state = Connected
 }
 
+func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
+	if len(req.payload) != 1 {
+		c.errorForRequest(req, "Incorrect payload")
+		return
+	}
+
+	friendPungID := req.payload[0]
+	if !c.pungRE.MatchString(friendPungID) {
+		c.errorForRequest(req, "friend id doesn't match valid PungID")
+		return
+	}
+
+	matches := c.pungRE.FindStringSubmatch(friendPungID)
+	//friendName := matches[1]
+	friendHost := matches[2]
+
+	if friendHost != serverConfig.ServerName {
+		c.errorForRequest(req, "friends from other server aren't implemented yet")
+		return
+	}
+
+	friend := userSet.GetUser(friendPungID)
+	if friend == nil {
+		c.errorForRequest(req, "User with requested id doesn't exist")
+		return
+	}
+
+	userSet.SendFriendshipRequest(c.user, friend)
+
+	c.simpleResponse(req, "ok")
+}
+
+func (c *ClientConnHandl) getFriendsProcedure(req *ClientRequest) {
+	c.errorForRequest(req, "Not implemented")
+}
+
+func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
+	c.errorForRequest(req, "Not implemented")
+}
+
+func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
+	c.errorForRequest(req, "Not implemented")
+}
+
 func (c *ClientConnHandl) ping() {
 	res := new(ClientResponse)
 	res.cSeq = -1
@@ -443,6 +493,14 @@ func (c *ClientConnHandl) Run() {
 				switch req.message {
 				case "logout":
 					go c.logoutProcedure()
+				case "add_friend":
+					go c.addFriendProcedure(req)
+				case "get_friends":
+					go c.getFriendsProcedure(req)
+				case "get_messages":
+					go c.getMessagesProcedure(req)
+				case "send_message":
+					go c.sendMessageProcedure(req)
 				default:
 					go c.errorForRequest(req, "Unknowne message in Authenticated state")
 				}
