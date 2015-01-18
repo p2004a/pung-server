@@ -193,6 +193,9 @@ func (s *UserSet) SetFriendship(u1, u2 *User) {
 		}
 	}
 
+	delete(u1.data.friendshipRequests, u2)
+	delete(u2.data.friendshipRequests, u1)
+
 	u1.data.friends = append(u1.data.friends, u2)
 	u2.data.friends = append(u2.data.friends, u1)
 
