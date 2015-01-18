@@ -462,6 +462,34 @@ func (c *ClientConnHandl) getFriendsProcedure(req *ClientRequest) {
 	}
 }
 
+func (c *ClientConnHandl) getFriendRequestsProcedure(req *ClientRequest) {
+	if len(req.payload) != 0 {
+		c.errorForRequest(req, "Incorrect payload")
+		return
+	}
+
+	for friend := range c.loginStruct.FriendsRequests {
+		go func(user, friend *users.User, req *ClientRequest) {
+			res := &ClientResponse{
+				cSeq:    req.cSeq,
+				sSeq:    <-c.seqNum,
+				message: "friend_request",
+				payload: []string{friend.FullId()},
+			}
+			req, _ = c.singleRequest(res, 0)
+			if req == nil {
+				return
+			}
+			switch req.message {
+			case "accept":
+				userSet.SetFriendship(user, friend)
+			case "refuse":
+				userSet.RefuseFriendship(user, friend)
+			}
+		}(c.user, friend, req)
+	}
+}
+
 func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 	c.errorForRequest(req, "Not implemented")
 }
@@ -575,6 +603,8 @@ func (c *ClientConnHandl) Run() {
 					go c.addFriendProcedure(req)
 				case "get_friends":
 					go c.getFriendsProcedure(req)
+				case "get_friend_requests":
+					go c.getFriendRequestsProcedure(req)
 				case "get_messages":
 					go c.getMessagesProcedure(req)
 				case "send_message":
