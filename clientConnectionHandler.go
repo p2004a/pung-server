@@ -511,7 +511,10 @@ func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 			message: "message",
 			payload: []string{
 				msg.From.FullId(),
-				base64.StdEncoding.EncodeToString([]byte(msg.Content)),
+				msg.Content,
+				msg.Signature,
+				msg.Key,
+				msg.Iv,
 			},
 		}
 		req2, err := c.singleRequest(res, 3*time.Second)
@@ -529,7 +532,7 @@ func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
-	if len(req.payload) != 2 {
+	if len(req.payload) != 5 {
 		c.errorForRequest(req, "Incorrect payload")
 		return
 	}
@@ -544,10 +547,12 @@ func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
 	//friendName := matches[1]
 	friendHost := matches[2]
 
-	messageBuf, err := base64.StdEncoding.DecodeString(req.payload[1])
-	if err != nil {
-		c.errorForRequest(req, "Message wasn't encoded in valid base64")
-		return
+	for i := 1; i <= 4; i++ {
+		_, err := base64.StdEncoding.DecodeString(req.payload[i])
+		if err != nil {
+			c.errorForRequest(req, fmt.Sprintf("payload part %d wasn't encoded in valid base64", i))
+			return
+		}
 	}
 
 	if friendHost != serverConfig.ServerName {
@@ -566,7 +571,15 @@ func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
 		return
 	}
 
-	userSet.SendMessage(c.user, friend, string(messageBuf))
+	msg := &users.Message{
+		From:      c.user,
+		Content:   req.payload[1],
+		Signature: req.payload[2],
+		Key:       req.payload[3],
+		Iv:        req.payload[4],
+	}
+
+	userSet.SendMessage(friend, msg)
 
 	c.simpleResponse(req, "ok")
 }

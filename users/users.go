@@ -36,8 +36,11 @@ func NewUser() *User {
 }
 
 type Message struct {
-	Content string
-	From    *User
+	Content   string
+	Signature string
+	Key       string
+	Iv        string
+	From      *User
 }
 
 type notify struct{}
@@ -212,9 +215,7 @@ func (s *UserSet) AreFriends(u1, u2 *User) bool {
 	return u1.data.friends[u2]
 }
 
-func (s *UserSet) SendMessage(from, to *User, content string) {
-	msg := &Message{From: from, Content: content}
-
+func (s *UserSet) SendMessage(to *User, msg *Message) {
 	to.data.lock.Lock()
 	to.data.messages.PushBack(msg)
 	if to.data.messages.Len() == 1 && to.isLogged() {
