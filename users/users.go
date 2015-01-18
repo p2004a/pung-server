@@ -36,8 +36,8 @@ func NewUser() *User {
 }
 
 type Message struct {
-	content string
-	from    *User
+	Content string
+	From    *User
 }
 
 type notify struct{}
@@ -208,7 +208,7 @@ func (s *UserSet) SetFriendship(u1, u2 *User) {
 }
 
 func (s *UserSet) SendMessage(from, to *User, content string) {
-	msg := &Message{from: from, content: content}
+	msg := &Message{From: from, Content: content}
 
 	to.data.lock.Lock()
 	to.data.messages.PushBack(msg)
