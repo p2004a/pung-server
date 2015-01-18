@@ -44,7 +44,7 @@ type notify struct{}
 
 type userData struct {
 	user                   *User
-	friends                []*User
+	friends                map[*User]bool
 	friendChan             chan<- *User
 	friendshipRequests     map[*User]bool
 	friendshipRequestsChan chan<- *User
@@ -57,7 +57,7 @@ type userData struct {
 func newUserData(user *User) *userData {
 	data := &userData{
 		user:               user,
-		friends:            []*User{},
+		friends:            make(map[*User]bool),
 		friendshipRequests: make(map[*User]bool),
 		messages:           list.New(),
 		logged:             nil,
@@ -164,7 +164,7 @@ func (s *UserSet) SendFriendshipRequest(from, to *User) {
 	to.data.lock.Lock()
 	defer to.data.lock.Unlock()
 
-	if ok := to.data.friendshipRequests[from]; !ok {
+	if !to.data.friendshipRequests[from] && !to.data.friends[from] {
 		to.data.friendshipRequests[from] = true
 		if to.isLogged() {
 			to.data.friendshipRequestsChan <- from
@@ -187,17 +187,15 @@ func (s *UserSet) SetFriendship(u1, u2 *User) {
 	lockUsers(u1, u2)
 	defer unlockUsers(u1, u2)
 
-	for _, f := range u1.data.friends {
-		if f == u2 {
-			return
-		}
+	if u1.data.friends[u2] {
+		return
 	}
 
 	delete(u1.data.friendshipRequests, u2)
 	delete(u2.data.friendshipRequests, u1)
 
-	u1.data.friends = append(u1.data.friends, u2)
-	u2.data.friends = append(u2.data.friends, u1)
+	u1.data.friends[u2] = true
+	u2.data.friends[u1] = true
 
 	if ch := u1.data.friendChan; ch != nil {
 		ch <- u2
@@ -205,6 +203,13 @@ func (s *UserSet) SetFriendship(u1, u2 *User) {
 	if ch := u2.data.friendChan; ch != nil {
 		ch <- u1
 	}
+}
+
+func (s *UserSet) AreFriends(u1, u2 *User) bool {
+	u1.data.lock.RLock()
+	defer u1.data.lock.RUnlock()
+
+	return u1.data.friends[u2]
 }
 
 func (s *UserSet) SendMessage(from, to *User, content string) {
@@ -297,7 +302,7 @@ func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <
 	friendList := list.New()
 
 	user.data.lock.RLock()
-	for _, friend := range user.data.friends {
+	for friend := range user.data.friends {
 		friendList.PushBack(friend)
 	}
 	user.data.lock.RUnlock()
