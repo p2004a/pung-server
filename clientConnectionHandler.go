@@ -160,15 +160,24 @@ func (c *ClientConnHandl) singleRequest(res *ClientResponse, timeout time.Durati
 	if err := c.sendResponse(res); err != nil {
 		return nil, err
 	}
-	select {
-	case req, ok := <-check:
+	if timeout > 0 {
+		select {
+		case req, ok := <-check:
+			if ok {
+				return req, nil
+			} else {
+				return nil, nil
+			}
+		case <-time.After(timeout):
+			return nil, errors.New("timeouted waiting for request")
+		}
+	} else {
+		req, ok := <-check
 		if ok {
 			return req, nil
 		} else {
 			return nil, nil
 		}
-	case <-time.After(2 * time.Second):
-		return nil, errors.New("timeouted waiting for request")
 	}
 }
 
