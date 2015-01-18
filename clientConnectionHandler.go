@@ -491,7 +491,31 @@ func (c *ClientConnHandl) getFriendRequestsProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
-	c.errorForRequest(req, "Not implemented")
+	for {
+		msg, ok := <-c.loginStruct.Messages
+		if !ok {
+			return
+		}
+		res := &ClientResponse{
+			cSeq:    req.cSeq,
+			sSeq:    <-c.seqNum,
+			message: "message",
+			payload: []string{
+				msg.From.FullId(),
+				base64.StdEncoding.EncodeToString([]byte(msg.Content)),
+			},
+		}
+		req2, err := c.singleRequest(res, 1*time.Second)
+		if err == nil && req2 == nil {
+			c.loginStruct.MessagesConfirm <- false
+			return
+		}
+		if err != nil || req2.message != "ok" {
+			log.Print("Failed to deliver message")
+			c.loginStruct.MessagesConfirm <- false
+		}
+		c.loginStruct.MessagesConfirm <- true
+	}
 }
 
 func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
