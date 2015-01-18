@@ -317,10 +317,10 @@ func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <
 }
 
 type LoginStruct struct {
-	messages        <-chan *Message
-	messagesConfirm chan<- bool
-	friends         <-chan *User
-	friendsRequests <-chan *User
+	Messages        <-chan *Message
+	MessagesConfirm chan<- bool
+	Friends         <-chan *User
+	FriendsRequests <-chan *User
 }
 
 func (s *UserSet) LogIn(user *User) (*LoginStruct, error) {
@@ -351,10 +351,10 @@ func (s *UserSet) LogIn(user *User) (*LoginStruct, error) {
 	go s.messageDeliverer(user, msgCh, msgConfCh, msgNew, stopCh)
 
 	loginStruct := &LoginStruct{
-		messages:        msgCh,
-		messagesConfirm: msgConfCh,
-		friends:         friendChOut,
-		friendsRequests: friendReqChOut,
+		Messages:        msgCh,
+		MessagesConfirm: msgConfCh,
+		Friends:         friendChOut,
+		FriendsRequests: friendReqChOut,
 	}
 
 	return loginStruct, nil
