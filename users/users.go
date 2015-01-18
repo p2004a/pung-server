@@ -172,6 +172,13 @@ func (s *UserSet) SendFriendshipRequest(from, to *User) {
 	}
 }
 
+func (s *UserSet) RefuseFriendship(who, whom *User) {
+	who.data.lock.Lock()
+	defer who.data.lock.Unlock()
+
+	delete(who.data.friendshipRequests, whom)
+}
+
 func (s *UserSet) SetFriendship(u1, u2 *User) {
 	if u1 == u2 {
 		return
