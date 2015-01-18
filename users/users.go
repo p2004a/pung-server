@@ -316,12 +316,19 @@ func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <
 	close(friendOut)
 }
 
-func (s *UserSet) LogIn(user *User) (<-chan *Message, chan<- bool, <-chan *User, <-chan *User, error) {
+type LoginStruct struct {
+	messages        <-chan *Message
+	messagesConfirm chan<- bool
+	friends         <-chan *User
+	friendsRequests <-chan *User
+}
+
+func (s *UserSet) LogIn(user *User) (*LoginStruct, error) {
 	user.data.lock.Lock()
 	defer user.data.lock.Unlock()
 
 	if user.isLogged() {
-		return nil, nil, nil, nil, errors.New("user is already logged in")
+		return nil, errors.New("user is already logged in")
 	}
 
 	stopCh := make(chan notify)
@@ -343,7 +350,14 @@ func (s *UserSet) LogIn(user *User) (<-chan *Message, chan<- bool, <-chan *User,
 	user.data.newMessageChan = msgNew
 	go s.messageDeliverer(user, msgCh, msgConfCh, msgNew, stopCh)
 
-	return msgCh, msgConfCh, friendChOut, friendReqChOut, nil
+	loginStruct := &LoginStruct{
+		messages:        msgCh,
+		messagesConfirm: msgConfCh,
+		friends:         friendChOut,
+		friendsRequests: friendReqChOut,
+	}
+
+	return loginStruct, nil
 }
 
 func (s *UserSet) LogOut(user *User) {
