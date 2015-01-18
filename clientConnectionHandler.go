@@ -64,15 +64,16 @@ type RequestChannels struct {
 }
 
 type ClientConnHandl struct {
-	state     ClientConnState
-	conn      net.Conn
-	reader    *bufio.Reader
-	resChan   chan<- *ClientResponse
-	seqNum    <-chan int
-	reqMap    map[int]RequestChannels
-	reqMapMux sync.Mutex
-	user      *users.User
-	pungRE    *regexp.Regexp
+	state       ClientConnState
+	conn        net.Conn
+	reader      *bufio.Reader
+	resChan     chan<- *ClientResponse
+	seqNum      <-chan int
+	reqMap      map[int]RequestChannels
+	reqMapMux   sync.Mutex
+	user        *users.User
+	loginStruct *users.LoginStruct
+	pungRE      *regexp.Regexp
 }
 
 func NewClientConnHandl(conn net.Conn) *ClientConnHandl {
@@ -288,6 +289,12 @@ func (c *ClientConnHandl) loginProcedure(req *ClientRequest) {
 		return
 	}
 
+	c.loginStruct, err = userSet.LogIn(user)
+	if err != nil {
+		c.errorForRequest(req, err.Error())
+		return
+	}
+
 	c.simpleResponse(req, "ok")
 
 	c.user = user
@@ -343,6 +350,12 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 		return
 	}
 
+	c.loginStruct, err = userSet.LogIn(user)
+	if err != nil {
+		panic(err.Error())
+		return
+	}
+
 	user.Key = key
 
 	c.simpleResponse(req, "ok")
@@ -352,6 +365,7 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) logoutProcedure() {
+	userSet.LogOut(c.user)
 	c.user = nil
 	c.state = Connected
 }
@@ -486,6 +500,9 @@ func (c *ClientConnHandl) Run() {
 			return
 		}
 		if req == nil {
+			if c.user != nil {
+				userSet.LogOut(c.user)
+			}
 			return
 		}
 
