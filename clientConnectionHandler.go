@@ -242,7 +242,11 @@ func (c *ClientConnHandl) getRequest() (*ClientRequest, error) {
 	}
 
 	req.message = matches[3]
-	req.payload = strings.Split(lines[1], " ")
+	if lines[1] == "" {
+		req.payload = []string{}
+	} else {
+		req.payload = strings.Split(lines[1], " ")
+	}
 
 	return req, nil
 }
@@ -491,6 +495,11 @@ func (c *ClientConnHandl) getFriendRequestsProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
+	if len(req.payload) != 0 {
+		c.errorForRequest(req, "Incorrect payload")
+		return
+	}
+
 	for {
 		msg, ok := <-c.loginStruct.Messages
 		if !ok {
