@@ -528,7 +528,7 @@ func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
-	if len(req.payload) != 0 {
+	if len(req.payload) != 2 {
 		c.errorForRequest(req, "Incorrect payload")
 		return
 	}
