@@ -46,7 +46,7 @@ type userData struct {
 	user                   *User
 	friends                []*User
 	friendChan             chan<- *User
-	friendshipRequests     map[int32]bool
+	friendshipRequests     map[*User]bool
 	friendshipRequestsChan chan<- *User
 	messages               *list.List
 	newMessageChan         chan<- notify
@@ -58,7 +58,7 @@ func newUserData(user *User) *userData {
 	data := &userData{
 		user:               user,
 		friends:            []*User{},
-		friendshipRequests: make(map[int32]bool),
+		friendshipRequests: make(map[*User]bool),
 		messages:           list.New(),
 		logged:             nil,
 	}
@@ -161,7 +161,15 @@ func (s *UserSet) GetUser(username string) *User {
 }
 
 func (s *UserSet) SendFriendshipRequest(from, to *User) {
+	to.data.lock.Lock()
+	defer to.data.lock.Unlock()
 
+	if ok := to.data.friendshipRequests[from]; !ok {
+		to.data.friendshipRequests[from] = true
+		if to.isLogged() {
+			to.data.friendshipRequestsChan <- from
+		}
+	}
 }
 
 func (s *UserSet) SetFriendship(u1, u2 *User) {
@@ -242,8 +250,37 @@ func (s *UserSet) messageDeliverer(user *User, msgCh chan<- *Message, conf <-cha
 	}
 }
 
-func (s *UserSet) friendsRequestDeliverer() {
+func (s *UserSet) friendsRequestDeliverer(user *User, reqOut chan<- *User, reqIn <-chan *User, stop <-chan notify) {
+	reqs := list.New()
 
+	user.data.lock.RLock()
+	for req := range user.data.friendshipRequests {
+		reqs.PushBack(req)
+	}
+	user.data.lock.RUnlock()
+
+	for {
+		if reqs.Front() == nil {
+			select {
+			case req := <-reqIn:
+				reqs.PushBack(req)
+			case <-stop:
+				return
+			}
+		} else {
+			req, _ := reqs.Front().Value.(*User)
+			select {
+			case reqOut <- req:
+				reqs.Remove(reqs.Front())
+			case req := <-reqIn:
+				reqs.PushBack(req)
+			case <-stop:
+				return
+			}
+		}
+	}
+
+	close(reqOut)
 }
 
 func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <-chan *User, stop <-chan notify) {
@@ -279,12 +316,12 @@ func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <
 	close(friendOut)
 }
 
-func (s *UserSet) LogIn(user *User) (<-chan *Message, chan<- bool, <-chan *User, error) {
+func (s *UserSet) LogIn(user *User) (<-chan *Message, chan<- bool, <-chan *User, <-chan *User, error) {
 	user.data.lock.Lock()
 	defer user.data.lock.Unlock()
 
 	if user.isLogged() {
-		return nil, nil, nil, errors.New("user is already logged in")
+		return nil, nil, nil, nil, errors.New("user is already logged in")
 	}
 
 	stopCh := make(chan notify)
@@ -295,13 +332,18 @@ func (s *UserSet) LogIn(user *User) (<-chan *Message, chan<- bool, <-chan *User,
 	user.data.friendChan = friendChIn
 	go s.friendsReporter(user, friendChOut, friendChIn, stopCh)
 
+	friendReqChIn := make(chan *User, 5)
+	friendReqChOut := make(chan *User)
+	user.data.friendshipRequestsChan = friendReqChIn
+	go s.friendsRequestDeliverer(user, friendReqChOut, friendReqChIn, stopCh)
+
 	msgCh := make(chan *Message)
 	msgConfCh := make(chan bool, 1) // must be 1 in case of stop just after sendinf message in messageDeliverer
 	msgNew := make(chan notify)
 	user.data.newMessageChan = msgNew
 	go s.messageDeliverer(user, msgCh, msgConfCh, msgNew, stopCh)
 
-	return msgCh, msgConfCh, friendChOut, nil
+	return msgCh, msgConfCh, friendChOut, friendReqChOut, nil
 }
 
 func (s *UserSet) LogOut(user *User) {
