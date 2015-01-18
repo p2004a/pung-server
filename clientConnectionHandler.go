@@ -519,7 +519,46 @@ func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 }
 
 func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
-	c.errorForRequest(req, "Not implemented")
+	if len(req.payload) != 0 {
+		c.errorForRequest(req, "Incorrect payload")
+		return
+	}
+
+	friendPungID := req.payload[0]
+	if !c.pungRE.MatchString(friendPungID) {
+		c.errorForRequest(req, "Friend id doesn't match valid PungID")
+		return
+	}
+
+	matches := c.pungRE.FindStringSubmatch(friendPungID)
+	//friendName := matches[1]
+	friendHost := matches[2]
+
+	messageBuf, err := base64.StdEncoding.DecodeString(req.payload[1])
+	if err != nil {
+		c.errorForRequest(req, "Message wasn't encoded in valid base64")
+		return
+	}
+
+	if friendHost != serverConfig.ServerName {
+		c.errorForRequest(req, "Friends from other server aren't implemented yet")
+		return
+	}
+
+	friend := userSet.GetUser(friendPungID)
+	if friend == nil {
+		c.errorForRequest(req, "User with requested id doesn't exist")
+		return
+	}
+
+	if !userSet.AreFriends(c.user, friend) {
+		c.errorForRequest(req, "You can send message only to your friends")
+		return
+	}
+
+	userSet.SendMessage(c.user, friend, string(messageBuf))
+
+	c.simpleResponse(req, "ok")
 }
 
 func (c *ClientConnHandl) ping() {
