@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"crypto/rsa"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 type User struct {
 	id   int32
+	data *userData
 	Name string
 	Host string
 	Key  *rsa.PublicKey
@@ -20,19 +22,52 @@ func (u *User) FullId() string {
 	return u.Name + "@" + u.Host
 }
 
+// assumes data.lock is locked
+func (u *User) isLogged() bool {
+	return u.data.logged != nil
+}
+
 func NewUser() *User {
-	return &User{
+	user := &User{
 		id: -1,
 	}
+	user.data = newUserData(user)
+	return user
+}
+
+type Message struct {
+	content string
+	from    *User
+}
+
+type notify struct{}
+
+type userData struct {
+	user                   *User
+	friends                []*User
+	friendChan             chan<- *User
+	friendshipRequests     map[int32]bool
+	friendshipRequestsChan chan<- *User
+	messages               *list.List
+	newMessageChan         chan<- notify
+	logged                 chan<- notify
+	lock                   sync.RWMutex
+}
+
+func newUserData(user *User) *userData {
+	data := &userData{
+		user:               user,
+		friends:            []*User{},
+		friendshipRequests: make(map[int32]bool),
+		messages:           list.New(),
+		logged:             nil,
+	}
+	return data
 }
 
 type UserSet struct {
 	idGen         int32
 	usersNameHost map[string]*User
-	usersId       map[int32]*User
-	friends       map[int32][]*User
-	logged        map[int32]chan<- struct{}
-	friendChan    map[int32]chan<- *User
 	lock          sync.RWMutex
 	serverName    string
 }
@@ -41,10 +76,6 @@ func NewUserSet(serverName string) *UserSet {
 	return &UserSet{
 		idGen:         0,
 		usersNameHost: make(map[string]*User),
-		usersId:       make(map[int32]*User),
-		friends:       make(map[int32][]*User),
-		logged:        make(map[int32]chan<- struct{}),
-		friendChan:    make(map[int32]chan<- *User),
 		serverName:    serverName,
 	}
 }
@@ -74,27 +105,52 @@ func (s *UserSet) AddUser(user *User) bool {
 	if _, ok := s.usersNameHost[user.FullId()]; ok {
 		return false
 	}
+	user.data.lock.Lock()
+	defer user.data.lock.Unlock()
 	user.id = s.newId()
 	s.usersNameHost[user.FullId()] = user
-	s.usersId[user.id] = user
-	s.friends[user.id] = []*User{}
 	return true
 }
 
+// TODO: deep remove
 func (s *UserSet) RemoveUser(user *User) bool {
 	if user.id == -1 {
 		return false
 	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if _, ok := s.usersId[user.id]; !ok {
-		return false
-	}
-	delete(s.usersId, user.id)
-	delete(s.friends, user.id)
+	user.data.lock.Lock()
+	defer user.data.lock.Unlock()
 	delete(s.usersNameHost, user.FullId())
 	user.id = -1
 	return true
+}
+
+type userSlice []*User
+
+func (s userSlice) Len() int {
+	return len(s)
+}
+
+func (s userSlice) Less(i, j int) bool {
+	return s[i].id < s[j].id
+}
+
+func (s userSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func lockUsers(users ...*User) {
+	sort.Sort(userSlice(users))
+	for _, user := range users {
+		user.data.lock.Lock()
+	}
+}
+
+func unlockUsers(users ...*User) {
+	for _, user := range users {
+		user.data.lock.Unlock()
+	}
 }
 
 func (s *UserSet) GetUser(username string) *User {
@@ -109,42 +165,95 @@ func (s *UserSet) SendFriendshipRequest(from, to *User) {
 }
 
 func (s *UserSet) SetFriendship(u1, u2 *User) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	if u1 == u2 {
 		return
 	}
 
-	for _, f := range s.friends[u1.id] {
+	lockUsers(u1, u2)
+	defer unlockUsers(u1, u2)
+
+	for _, f := range u1.data.friends {
 		if f == u2 {
 			return
 		}
 	}
 
-	s.friends[u1.id] = append(s.friends[u1.id], u2)
-	s.friends[u2.id] = append(s.friends[u2.id], u1)
+	u1.data.friends = append(u1.data.friends, u2)
+	u2.data.friends = append(u2.data.friends, u1)
 
-	if ch, ok := s.friendChan[u1.id]; ok {
+	if ch := u1.data.friendChan; ch != nil {
 		ch <- u2
 	}
-	if ch, ok := s.friendChan[u2.id]; ok {
+	if ch := u2.data.friendChan; ch != nil {
 		ch <- u1
 	}
 }
 
-func (s *UserSet) messageDeliverer(user *User, msg chan<- string, conf <-chan bool, stop <-chan struct{}) {
+func (s *UserSet) SendMessage(from, to *User, content string) {
+	msg := &Message{from: from, content: content}
+
+	to.data.lock.Lock()
+	to.data.messages.PushBack(msg)
+	if to.data.messages.Len() == 1 && to.isLogged() {
+		to.data.newMessageChan <- notify{}
+	}
+	to.data.lock.Unlock()
+}
+
+func (s *UserSet) messageDeliverer(user *User, msgCh chan<- *Message, conf <-chan bool, newMsg <-chan notify, stop <-chan notify) {
+	for {
+		select {
+		case <-newMsg:
+		default:
+		}
+		user.data.lock.Lock()
+		var msg *Message
+		if val := user.data.messages.Front(); val != nil {
+			var ok bool
+			msg, ok = val.Value.(*Message)
+			if !ok {
+				panic("messages didn't containt *message")
+			}
+		}
+		user.data.lock.Unlock()
+		if msg != nil {
+			select {
+			case msgCh <- msg:
+			case <-stop:
+				return
+			}
+			select {
+			case ok := <-conf:
+				if ok {
+					user.data.lock.Lock()
+					user.data.messages.Remove(user.data.messages.Front())
+					user.data.lock.Unlock()
+				}
+			case <-stop:
+				return
+			}
+		} else {
+			select {
+			case <-newMsg:
+			case <-stop:
+				return
+			}
+		}
+	}
+}
+
+func (s *UserSet) friendsRequestDeliverer() {
 
 }
 
-func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <-chan *User, stop <-chan struct{}) {
+func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <-chan *User, stop <-chan notify) {
 	friendList := list.New()
 
-	s.lock.RLock()
-	for _, friend := range s.friends[user.id] {
+	user.data.lock.RLock()
+	for _, friend := range user.data.friends {
 		friendList.PushBack(friend)
 	}
-	s.lock.RUnlock()
+	user.data.lock.RUnlock()
 
 	for {
 		if friendList.Front() == nil {
@@ -166,41 +275,45 @@ func (s *UserSet) friendsReporter(user *User, friendOut chan<- *User, friendIn <
 			}
 		}
 	}
+
+	close(friendOut)
 }
 
-func (s *UserSet) LogIn(user *User) (<-chan string, chan<- bool, error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *UserSet) LogIn(user *User) (<-chan *Message, chan<- bool, <-chan *User, error) {
+	user.data.lock.Lock()
+	defer user.data.lock.Unlock()
 
-	if _, ok := s.logged[user.id]; ok {
-		return nil, nil, errors.New("user is already logged in")
+	if user.isLogged() {
+		return nil, nil, nil, errors.New("user is already logged in")
 	}
 
-	stopCh := make(chan struct{}, 2)
-	s.logged[user.id] = stopCh
+	stopCh := make(chan notify)
+	user.data.logged = stopCh
 
 	friendChIn := make(chan *User, 5)
 	friendChOut := make(chan *User)
-	s.friendChan[user.id] = friendChIn
+	user.data.friendChan = friendChIn
 	go s.friendsReporter(user, friendChOut, friendChIn, stopCh)
 
-	msgCh := make(chan string)
-	mshConfCh := make(chan bool)
-	go s.messageDeliverer(user, msgCh, mshConfCh, stopCh)
+	msgCh := make(chan *Message)
+	msgConfCh := make(chan bool, 1) // must be 1 in case of stop just after sendinf message in messageDeliverer
+	msgNew := make(chan notify)
+	user.data.newMessageChan = msgNew
+	go s.messageDeliverer(user, msgCh, msgConfCh, msgNew, stopCh)
 
-	return msgCh, mshConfCh, nil
+	return msgCh, msgConfCh, friendChOut, nil
 }
 
 func (s *UserSet) LogOut(user *User) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	user.data.lock.Lock()
+	defer user.data.lock.Unlock()
 
-	if _, ok := s.logged[user.id]; !ok {
+	if !user.isLogged() {
 		panic("user was not logged")
 	}
 
-	stopCh := s.logged[user.id]
-	for i := 0; i < 2; i++ {
-		stopCh <- struct{}{}
+	for i := 0; i < 3; i++ {
+		user.data.logged <- notify{}
 	}
+	user.data.logged = nil
 }
