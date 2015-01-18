@@ -408,9 +408,7 @@ func (c *ClientConnHandl) getFriendsProcedure(req *ClientRequest) {
 		return
 	}
 
-	friends := userSet.GetFriends(c.user)
-
-	for _, friend := range friends {
+	for friend := range c.loginStruct.Friends {
 		buf, err := rsaPublicKeyToDER(friend.Key)
 		if err != nil {
 			panic("cannot create der from pubkey")
