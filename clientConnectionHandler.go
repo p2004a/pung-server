@@ -55,6 +55,7 @@ type ClientConnState int
 
 const (
 	Connected ClientConnState = iota
+	Authenticating
 	Authenticated
 )
 
@@ -133,6 +134,15 @@ func (c *ClientConnHandl) handleRequestUsingReqGen(req *ClientRequest) bool {
 	return false
 }
 
+func (c *ClientConnHandl) closeAllReqGen() {
+	c.reqMapMux.Lock()
+	for key := range c.reqMap {
+		cr := c.reqMap[key]
+		close(cr.ch)
+	}
+	c.reqMapMux.Unlock()
+}
+
 func (c *ClientConnHandl) sendResponse(res *ClientResponse) (err error) {
 	defer func() {
 		if x := recover(); x != nil {
@@ -151,8 +161,12 @@ func (c *ClientConnHandl) singleRequest(res *ClientResponse, timeout time.Durati
 		return nil, err
 	}
 	select {
-	case req := <-check:
-		return req, nil
+	case req, ok := <-check:
+		if ok {
+			return req, nil
+		} else {
+			return nil, nil
+		}
 	case <-time.After(2 * time.Second):
 		return nil, errors.New("timeouted waiting for request")
 	}
@@ -247,7 +261,7 @@ func (c *ClientConnHandl) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*Cl
 	res.sSeq = <-c.seqNum
 
 	req, err = c.singleRequest(res, 1*time.Second)
-	if err != nil {
+	if err != nil || req == nil {
 		return nil, nil
 	}
 	if req.message != "check" || len(req.payload) != 1 {
@@ -267,30 +281,38 @@ func (c *ClientConnHandl) verifyKey(req *ClientRequest, key *rsa.PublicKey) (*Cl
 
 func (c *ClientConnHandl) loginProcedure(req *ClientRequest) {
 	if len(req.payload) != 1 {
+		c.state = Connected
 		c.errorForRequest(req, "Incorrect login payload")
 		return
 	}
 
 	user := userSet.GetUser(req.payload[0])
 	if user == nil {
+		c.state = Connected
 		c.errorForRequest(req, "There is no user with requested login")
 		return
 	}
+
 	if user.Key == nil {
+		c.state = Connected
 		c.errorForRequest(req, "Cannot login to account without verified key")
 		return
 	}
 
 	req, err := c.verifyKey(req, user.Key)
 	if err != nil {
+		c.state = Connected
 		c.errorForRequest(req, err.Error())
+		return
 	}
+
 	if req == nil {
 		return
 	}
 
 	c.loginStruct, err = userSet.LogIn(user)
 	if err != nil {
+		c.state = Connected
 		c.errorForRequest(req, err.Error())
 		return
 	}
@@ -303,22 +325,26 @@ func (c *ClientConnHandl) loginProcedure(req *ClientRequest) {
 
 func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 	if len(req.payload) != 2 {
+		c.state = Connected
 		c.errorForRequest(req, "Incorrect singnup payload")
 		return
 	}
 
 	keyBuff, err := base64.StdEncoding.DecodeString(req.payload[1])
 	if err != nil {
+		c.state = Connected
 		c.errorForRequest(req, "Key was not valid base64")
 		return
 	}
 	key, err := rsaPublicKeyFromDER(keyBuff)
 	if err != nil {
+		c.state = Connected
 		c.errorForRequest(req, "Cannot parse key")
 		return
 	}
 	login := req.payload[0]
 	if len(login) < 3 || len(login) > 20 {
+		c.state = Connected
 		c.errorForRequest(req, "Login must be between 3 and 20 characters long")
 		return
 	}
@@ -328,6 +354,7 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 		panic("Cannot compile regexp")
 	}
 	if !loginRE.MatchString(login) {
+		c.state = Connected
 		c.errorForRequest(req, "Login can consist only of alphanumerics and underscores")
 		return
 	}
@@ -337,13 +364,17 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 	user.Host = serverConfig.ServerName
 	user.Key = nil
 	if !userSet.AddUser(user) {
+		c.state = Connected
 		c.errorForRequest(req, "There exists user with this name")
+		return
 	}
 
 	req, err = c.verifyKey(req, key)
 	if err != nil {
+		c.state = Connected
 		userSet.RemoveUser(user)
 		c.errorForRequest(req, err.Error())
+		return
 	}
 	if req == nil {
 		userSet.RemoveUser(user)
@@ -353,7 +384,6 @@ func (c *ClientConnHandl) signupProcedure(req *ClientRequest) {
 	c.loginStruct, err = userSet.LogIn(user)
 	if err != nil {
 		panic(err.Error())
-		return
 	}
 
 	user.Key = key
@@ -368,6 +398,8 @@ func (c *ClientConnHandl) logoutProcedure() {
 	userSet.LogOut(c.user)
 	c.user = nil
 	c.state = Connected
+	// for security reasons
+	c.closeAllReqGen()
 }
 
 func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
@@ -441,8 +473,8 @@ func (c *ClientConnHandl) ping() {
 		return
 	}
 	select {
-	case req := <-pong:
-		if req.message != "pong" {
+	case req, ok := <-pong:
+		if ok && req.message != "pong" {
 			c.errorForRequest(req, "Wrong response for ping request")
 		}
 	case <-time.After(5 * time.Second):
@@ -464,6 +496,7 @@ func (c *ClientConnHandl) resWriter(resChan <-chan *ClientResponse) {
 func (c *ClientConnHandl) Run() {
 	defer c.conn.Close()
 	defer log.Printf("Connection closed")
+	defer c.closeAllReqGen()
 
 	// buffer with 100KB -> max size of single message from user = 100KB
 	c.reader = bufio.NewReaderSize(c.conn, 100*1024)
@@ -515,16 +548,20 @@ func (c *ClientConnHandl) Run() {
 			case Connected:
 				switch req.message {
 				case "login":
+					c.state = Authenticating
 					go c.loginProcedure(req)
 				case "signup":
+					c.state = Authenticating
 					go c.signupProcedure(req)
 				default:
 					go c.errorForRequest(req, "Unknowne message in Connected state")
 				}
+			case Authenticating:
+				go c.errorForRequest(req, "Unknowne message in Authenticating state")
 			case Authenticated:
 				switch req.message {
 				case "logout":
-					go c.logoutProcedure()
+					c.logoutProcedure() // to make logout atomic
 				case "add_friend":
 					go c.addFriendProcedure(req)
 				case "get_friends":
