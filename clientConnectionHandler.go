@@ -514,7 +514,7 @@ func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 				base64.StdEncoding.EncodeToString([]byte(msg.Content)),
 			},
 		}
-		req2, err := c.singleRequest(res, 1*time.Second)
+		req2, err := c.singleRequest(res, 3*time.Second)
 		if err == nil && req2 == nil {
 			c.loginStruct.MessagesConfirm <- false
 			return
@@ -522,6 +522,7 @@ func (c *ClientConnHandl) getMessagesProcedure(req *ClientRequest) {
 		if err != nil || req2.message != "ok" {
 			log.Print("Failed to deliver message")
 			c.loginStruct.MessagesConfirm <- false
+			continue
 		}
 		c.loginStruct.MessagesConfirm <- true
 	}
