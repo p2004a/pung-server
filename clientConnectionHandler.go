@@ -451,7 +451,7 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 			c.errorForRequest(req, "Server returned ok but not returned key, sending messages will fail")
 			return
 		}
-		keyBuff, err := base64.StdEncoding.DecodeString(req.payload[1])
+		keyBuff, err := base64.StdEncoding.DecodeString(data[0])
 		if err != nil {
 			c.errorForRequest(req, "Server returned ok but key wasn't encoded base64 key, sending messages will fail")
 			return
