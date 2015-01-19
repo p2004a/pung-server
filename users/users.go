@@ -194,7 +194,7 @@ func (s *UserSet) SetFriendship(u1, u2 *User) {
 		return
 	}
 
-	if u1.data.friendshipRequests[u2] == nil && u2.data.friendshipRequests[u1] == nil {
+	if !u1.data.friendshipRequests[u2] && !u2.data.friendshipRequests[u1] {
 		return
 	}
 
