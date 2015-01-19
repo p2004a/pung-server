@@ -429,11 +429,40 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 		}
 		keyStr := base64.StdEncoding.EncodeToString(buf)
 
-		err = serverManager.SendMessage(friendHost, "add_friend", friendPungID, c.user.FullId(), keyStr)
+		friend := userSet.GetUser(friendPungID)
+		if friend == nil {
+			friend = users.NewUser()
+			friend.Name, friend.Host, _ = parsePungID(friendPungID)
+			friend.Key = c.user.Key // we can't do anything smarter
+			if !userSet.AddUser(friend) {
+				friend = userSet.GetUser(friendPungID)
+			}
+		}
+
+		userSet.SendFriendshipRequest(c.user, friend)
+
+		data, err := serverManager.SendMessage(friendHost, "add_friend", friendPungID, c.user.FullId(), keyStr)
 		if err != nil {
 			c.errorForRequest(req, "Cannot add friend from other server: "+err.Error())
 			return
 		}
+
+		if len(data) != 1 {
+			c.errorForRequest(req, "Server returned ok but not returned key, sending messages will fail")
+			return
+		}
+		keyBuff, err := base64.StdEncoding.DecodeString(req.payload[1])
+		if err != nil {
+			c.errorForRequest(req, "Server returned ok but key wasn't encoded base64 key, sending messages will fail")
+			return
+		}
+		key, err := rsaPublicKeyFromDER(keyBuff)
+		if err != nil {
+			c.errorForRequest(req, "Server returned ok but cannot parse returned key, sending messages will fail")
+			return
+		}
+
+		friend.Key = key
 	} else {
 		friend := userSet.GetUser(friendPungID)
 		if friend == nil {
@@ -486,13 +515,21 @@ func (c *ClientConnHandl) getFriendRequestsProcedure(req *ClientRequest) {
 			}
 			switch req.message {
 			case "accept":
-				if friend.Host == serverConfig.ServerName || serverManager.SendMessage(friend.Host, "accept_friendship", friend.FullId(), user.FullId()) == nil {
-					userSet.SetFriendship(user, friend)
+				if friend.Host != serverConfig.ServerName {
+					_, err := serverManager.SendMessage(friend.Host, "accept_friendship", friend.FullId(), user.FullId())
+					if err != nil {
+						break
+					}
 				}
+				userSet.SetFriendship(user, friend)
 			case "refuse":
-				if friend.Host == serverConfig.ServerName || serverManager.SendMessage(friend.Host, "refuse_friendship", friend.FullId(), user.FullId()) == nil {
-					userSet.RefuseFriendship(user, friend)
+				if friend.Host != serverConfig.ServerName {
+					_, err := serverManager.SendMessage(friend.Host, "refuse_friendship", friend.FullId(), user.FullId())
+					if err != nil {
+						break
+					}
 				}
+				userSet.RefuseFriendship(user, friend)
 			}
 		}(c.user, friend, req)
 	}
@@ -567,7 +604,7 @@ func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
 	}
 
 	if friend.Host != serverConfig.ServerName {
-		err := serverManager.SendMessage(friend.Host, "send_message", friend.FullId(), c.user.FullId(), req.payload[1], req.payload[2], req.payload[3], req.payload[4])
+		_, err := serverManager.SendMessage(friend.Host, "send_message", friend.FullId(), c.user.FullId(), req.payload[1], req.payload[2], req.payload[3], req.payload[4])
 		if err != nil {
 			c.errorForRequest(req, "Cannot send message to other server: "+err.Error())
 			return

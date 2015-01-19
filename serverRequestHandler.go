@@ -7,18 +7,18 @@ import (
 	"github.com/p2004a/pung-server/users"
 )
 
-func serverAddFriendProcedure(user *users.User, friendPungID string, data []string) error {
+func serverAddFriendProcedure(user *users.User, friendPungID string, data []string) ([]string, error) {
 	if len(data) != 1 {
-		return errors.New("incorrect request payload")
+		return []string{}, errors.New("incorrect request payload")
 	}
 
 	keyBuff, err := base64.StdEncoding.DecodeString(data[0])
 	if err != nil {
-		return errors.New("Key was not valid base64")
+		return []string{}, errors.New("Key was not valid base64")
 	}
 	key, err := rsaPublicKeyFromDER(keyBuff)
 	if err != nil {
-		return errors.New("Cannot parse key")
+		return []string{}, errors.New("Cannot parse key")
 	}
 
 	friend := userSet.GetUser(friendPungID)
@@ -33,24 +33,30 @@ func serverAddFriendProcedure(user *users.User, friendPungID string, data []stri
 
 	userSet.SendFriendshipRequest(friend, user)
 
-	return nil
-}
-
-func serverSendMessageProcedure(user *users.User, friendPungID string, data []string) error {
-	if len(data) != 4 {
-		return errors.New("incorrect request payload")
+	buf, err := rsaPublicKeyToDER(user.Key)
+	if err != nil {
+		panic("cannot create der from pubkey")
 	}
-	return errors.New("not implemented")
+	keyStr := base64.StdEncoding.EncodeToString(buf)
+
+	return []string{keyStr}, nil
 }
 
-func serverAcceptFriendshipProcedure(accept bool, user *users.User, friendPungID string, data []string) error {
+func serverSendMessageProcedure(user *users.User, friendPungID string, data []string) ([]string, error) {
+	if len(data) != 4 {
+		return []string{}, errors.New("incorrect request payload")
+	}
+	return []string{}, errors.New("not implemented")
+}
+
+func serverAcceptFriendshipProcedure(accept bool, user *users.User, friendPungID string, data []string) ([]string, error) {
 	if len(data) != 0 {
-		return errors.New("incorrect request payload")
+		return []string{}, errors.New("incorrect request payload")
 	}
 
 	friend := userSet.GetUser(friendPungID)
 	if friend == nil {
-		return errors.New("there wasn't any friendship request")
+		return []string{}, errors.New("there wasn't any friendship request")
 	}
 
 	if accept {
@@ -59,21 +65,21 @@ func serverAcceptFriendshipProcedure(accept bool, user *users.User, friendPungID
 		userSet.RefuseFriendship(friend, user)
 	}
 
-	return nil
+	return []string{}, nil
 }
 
-func serverRequestHandler(request []string) error {
+func serverRequestHandler(request []string) ([]string, error) {
 	if len(request) < 3 {
-		return errors.New("incorrect request")
+		return []string{}, errors.New("incorrect request")
 	}
 	for i := 1; i <= 2; i++ {
 		if _, _, err := parsePungID(request[i]); err != nil {
-			return errors.New(fmt.Sprintf("Invalid PungID in %d field", i))
+			return []string{}, errors.New(fmt.Sprintf("Invalid PungID in %d field", i))
 		}
 	}
 	user := userSet.GetUser(request[1])
 	if user == nil {
-		return errors.New(fmt.Sprintf("User %s doesn't exist", request[1]))
+		return []string{}, errors.New(fmt.Sprintf("User %s doesn't exist", request[1]))
 	}
 
 	switch request[0] {
@@ -86,7 +92,6 @@ func serverRequestHandler(request []string) error {
 	case "send_message":
 		return serverSendMessageProcedure(user, request[2], request[3:])
 	default:
-		return errors.New("unknown request name")
+		return []string{}, errors.New("unknown request name")
 	}
-	return nil
 }

@@ -12,11 +12,16 @@ import (
 	"time"
 )
 
-type ServerRequestHandler func(request []string) error
+type ServerRequestHandler func(request []string) ([]string, error)
+
+type serverResult struct {
+	data []string
+	err  error
+}
 
 type serverConn struct {
 	req chan<- []string
-	res <-chan error
+	res <-chan *serverResult
 }
 
 type ServerManager struct {
@@ -39,10 +44,10 @@ func (s *ServerManager) handleConnection(conn net.Conn) {
 		}
 		request := strings.Split(string(buf[0:len(buf)-1]), " ")
 
-		err = s.requestHandler(request)
+		data, err := s.requestHandler(request)
 		var response string
 		if err == nil {
-			response = "ok\n"
+			response = "ok " + strings.Join(data, " ") + "\n"
 		} else {
 			response = "error " + err.Error() + "\n"
 		}
@@ -63,7 +68,7 @@ func (s *ServerManager) run(listener net.Listener) {
 	}
 }
 
-func (s *ServerManager) connect(host string, req <-chan []string, res chan<- error) {
+func (s *ServerManager) connect(host string, req <-chan []string, res chan<- *serverResult) {
 	log.Printf("connecting to %s", host)
 
 	dialer := &net.Dialer{
@@ -82,9 +87,9 @@ func (s *ServerManager) connect(host string, req <-chan []string, res chan<- err
 
 	reader := bufio.NewReaderSize(conn, 101*1024)
 
-	sendRes := func(e error) {
+	sendRes := func(e error, data ...string) {
 		select {
-		case res <- e:
+		case res <- &serverResult{err: e, data: data}:
 		case <-time.After(time.Millisecond * 10):
 		}
 	}
@@ -112,8 +117,14 @@ Outer:
 		}
 
 		line := string(buf[0 : len(buf)-1])
-		if line == "ok" {
-			sendRes(nil)
+		if len(line) >= 3 && line[:3] == "ok " {
+			var data []string
+			if line[3:] == "" {
+				data = []string{}
+			} else {
+				data = strings.Split(line[3:], " ")
+			}
+			sendRes(nil, data...)
 		} else if len(line) > 6 && line[:6] == "error " {
 			sendRes(errors.New(line[6:]))
 		} else {
@@ -129,7 +140,7 @@ Outer:
 	s.serverMapLock.Unlock()
 }
 
-func (s *ServerManager) SendMessage(host string, data ...string) error {
+func (s *ServerManager) SendMessage(host string, data ...string) ([]string, error) {
 	s.serverMapLock.RLock()
 	serv, ok := s.serverMap[host]
 	s.serverMapLock.RUnlock()
@@ -138,7 +149,7 @@ func (s *ServerManager) SendMessage(host string, data ...string) error {
 		serv, ok = s.serverMap[host]
 		if !ok {
 			req := make(chan []string)
-			res := make(chan error)
+			res := make(chan *serverResult)
 			serv = &serverConn{
 				req: req,
 				res: res,
@@ -150,9 +161,10 @@ func (s *ServerManager) SendMessage(host string, data ...string) error {
 	}
 	select {
 	case serv.req <- data:
-		return <-serv.res
+		res := <-serv.res
+		return res.data, res.err
 	case <-time.After(time.Second):
-		return errors.New(fmt.Sprintf("sending request to %s timeouted", host))
+		return []string{}, errors.New(fmt.Sprintf("sending request to %s timeouted", host))
 	}
 }
 
