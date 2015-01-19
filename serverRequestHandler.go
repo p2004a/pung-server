@@ -43,18 +43,23 @@ func serverSendMessageProcedure(user *users.User, friendPungID string, data []st
 	return errors.New("not implemented")
 }
 
-func serverAcceptFriendshipProcedure(user *users.User, friendPungID string, data []string) error {
+func serverAcceptFriendshipProcedure(accept bool, user *users.User, friendPungID string, data []string) error {
 	if len(data) != 0 {
 		return errors.New("incorrect request payload")
 	}
-	return errors.New("not implemented")
-}
 
-func serverRefuseFriendshipProcedure(user *users.User, friendPungID string, data []string) error {
-	if len(data) != 0 {
-		return errors.New("incorrect request payload")
+	friend := userSet.GetUser(friendPungID)
+	if friend == nil {
+		return errors.New("there wasn't any friendship request")
 	}
-	return errors.New("not implemented")
+
+	if accept {
+		userSet.SetFriendship(user, friend)
+	} else {
+		userSet.RefuseFriendship(friend, user)
+	}
+
+	return nil
 }
 
 func serverRequestHandler(request []string) error {
@@ -75,9 +80,9 @@ func serverRequestHandler(request []string) error {
 	case "add_friend":
 		return serverAddFriendProcedure(user, request[2], request[3:])
 	case "accept_friendship":
-		return serverAcceptFriendshipProcedure(user, request[2], request[3:])
+		return serverAcceptFriendshipProcedure(true, user, request[2], request[3:])
 	case "refuse_friendship":
-		return serverRefuseFriendshipProcedure(user, request[2], request[3:])
+		return serverAcceptFriendshipProcedure(false, user, request[2], request[3:])
 	case "send_message":
 		return serverSendMessageProcedure(user, request[2], request[3:])
 	default:
