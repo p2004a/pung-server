@@ -428,11 +428,10 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 	}
 
 	matches := c.pungRE.FindStringSubmatch(friendPungID)
-	//friendName := matches[1]
 	friendHost := matches[2]
 
 	if friendHost != serverConfig.ServerName {
-		err := serverManager.SendMessage(friendHost, "add_friend", c.user.FullId())
+		err := serverManager.SendMessage(friendHost, "add_friend", friendPungID, c.user.FullId())
 		if err != nil {
 			c.errorForRequest(req, "Cannot add friend from other server: "+err.Error())
 			return
@@ -489,9 +488,13 @@ func (c *ClientConnHandl) getFriendRequestsProcedure(req *ClientRequest) {
 			}
 			switch req.message {
 			case "accept":
-				userSet.SetFriendship(user, friend)
+				if friend.Host == serverConfig.ServerName || serverManager.SendMessage(friend.Host, "accept_friendship", friend.FullId(), user.FullId()) == nil {
+					userSet.SetFriendship(user, friend)
+				}
 			case "refuse":
-				userSet.RefuseFriendship(user, friend)
+				if friend.Host == serverConfig.ServerName || serverManager.SendMessage(friend.Host, "refuse_friendship", friend.FullId(), user.FullId()) == nil {
+					userSet.RefuseFriendship(user, friend)
+				}
 			}
 		}(c.user, friend, req)
 	}
@@ -546,21 +549,12 @@ func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
 		return
 	}
 
-	matches := c.pungRE.FindStringSubmatch(friendPungID)
-	//friendName := matches[1]
-	friendHost := matches[2]
-
 	for i := 1; i <= 4; i++ {
 		_, err := base64.StdEncoding.DecodeString(req.payload[i])
 		if err != nil {
 			c.errorForRequest(req, fmt.Sprintf("payload part %d wasn't encoded in valid base64", i))
 			return
 		}
-	}
-
-	if friendHost != serverConfig.ServerName {
-		c.errorForRequest(req, "Friends from other server aren't implemented yet")
-		return
 	}
 
 	friend := userSet.GetUser(friendPungID)
@@ -574,15 +568,23 @@ func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
 		return
 	}
 
-	msg := &users.Message{
-		From:      c.user,
-		Content:   req.payload[1],
-		Signature: req.payload[2],
-		Key:       req.payload[3],
-		Iv:        req.payload[4],
-	}
+	if friend.Host != serverConfig.ServerName {
+		err := serverManager.SendMessage(friend.Host, "send_message", friend.FullId(), c.user.FullId(), req.payload[1], req.payload[2], req.payload[3], req.payload[4])
+		if err != nil {
+			c.errorForRequest(req, "Cannot send message to other server: "+err.Error())
+			return
+		}
+	} else {
+		msg := &users.Message{
+			From:      c.user,
+			Content:   req.payload[1],
+			Signature: req.payload[2],
+			Key:       req.payload[3],
+			Iv:        req.payload[4],
+		}
 
-	userSet.SendMessage(friend, msg)
+		userSet.SendMessage(friend, msg)
+	}
 
 	c.simpleResponse(req, "ok")
 }
