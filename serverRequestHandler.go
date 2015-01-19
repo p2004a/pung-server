@@ -46,7 +46,26 @@ func serverSendMessageProcedure(user *users.User, friendPungID string, data []st
 	if len(data) != 4 {
 		return []string{}, errors.New("incorrect request payload")
 	}
-	return []string{}, errors.New("not implemented")
+
+	friend := userSet.GetUser(friendPungID)
+	if friend == nil {
+		return []string{}, errors.New(fmt.Sprintf("User %s doesn't exist", friendPungID))
+	}
+
+	if !userSet.AreFriends(user, friend) {
+		return []string{}, errors.New(fmt.Sprintf("User %s and %s aren't friends", friend.FullId(), user.FullId()))
+	}
+
+	msg := &users.Message{
+		From:      friend,
+		Content:   data[0],
+		Signature: data[1],
+		Key:       data[2],
+		Iv:        data[3],
+	}
+	userSet.SendMessage(user, msg)
+
+	return []string{}, nil
 }
 
 func serverAcceptFriendshipProcedure(accept bool, user *users.User, friendPungID string, data []string) ([]string, error) {
