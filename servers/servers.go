@@ -149,7 +149,7 @@ func (s *ServerManager) SendMessage(host string, data ...string) error {
 	}
 }
 
-func NewServerManager(serverCert tls.Certificate, serverAddr, serverName string, connPort int) (*ServerManager, error) {
+func NewServerManager(serverCert tls.Certificate, serverAddr, serverName string, connPort int, handl ServerRequestHandler) (*ServerManager, error) {
 	tlsConfig := tls.Config{
 		Certificates:       []tls.Certificate{serverCert},
 		ServerName:         serverName,
@@ -176,8 +176,9 @@ func NewServerManager(serverCert tls.Certificate, serverAddr, serverName string,
 	log.Printf("server manager listening on address: %s\n", listener.Addr().String())
 
 	sm := &ServerManager{
-		serverName: serverName,
-		connPort:   connPort,
+		serverName:     serverName,
+		connPort:       connPort,
+		requestHandler: handl,
 	}
 	go sm.run(listener)
 	return sm, nil

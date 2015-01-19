@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
+	"github.com/p2004a/pung-server/servers"
 	"github.com/p2004a/pung-server/users"
 	"log"
 	"os"
@@ -19,6 +21,7 @@ type ServerConfiguration struct {
 	KeyFile    string
 }
 
+var serverManager *servers.ServerManager
 var userSet *users.UserSet
 var serverConfig ServerConfiguration
 
@@ -62,17 +65,19 @@ func main() {
 	config, err := loadServerConfiguration(configFile)
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(1)
 	}
 	serverConfig = config
 
 	serverCert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(1)
 	}
 
 	userSet = users.NewUserSet(config.ServerName)
+	serverManager, err = servers.NewServerManager(serverCert, fmt.Sprintf("%s:%d", config.ServerAddr, 24949), config.ServerName, 24949, serverRequestHandler)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	tlsConfig := tls.Config{
 		Certificates:       []tls.Certificate{serverCert},
@@ -93,7 +98,7 @@ func main() {
 	}
 	tlsConfig.BuildNameToCertificate()
 
-	listener, err := tls.Listen("tcp", config.ServerAddr, &tlsConfig)
+	listener, err := tls.Listen("tcp", fmt.Sprintf("%s:%d", config.ServerAddr, 24948), &tlsConfig)
 	if err != nil {
 		log.Fatal(err)
 		os.Exit(1)
@@ -103,7 +108,6 @@ func main() {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Fatal(err)
-			os.Exit(2)
 		}
 		log.Printf("Connection from: %s", conn.RemoteAddr().String())
 		handler := NewClientConnHandl(conn)
