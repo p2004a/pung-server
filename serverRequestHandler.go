@@ -23,10 +23,10 @@ func serverAddFriendProcedure(user *users.User, friendPungID string, data []stri
 
 	friend := userSet.GetUser(friendPungID)
 	if friend == nil {
-		user := users.NewUser()
-		user.Name, user.Host, _ = parsePungID(friendPungID)
-		user.Key = key
-		if !userSet.AddUser(user) {
+		friend = users.NewUser()
+		friend.Name, friend.Host, _ = parsePungID(friendPungID)
+		friend.Key = key
+		if !userSet.AddUser(friend) {
 			friend = userSet.GetUser(friendPungID)
 		}
 	}
