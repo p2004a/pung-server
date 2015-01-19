@@ -30,19 +30,21 @@ type ServerManager struct {
 func (s *ServerManager) handleConnection(conn net.Conn) {
 	reader := bufio.NewReaderSize(conn, 101*1024)
 
+	log.Printf("S2S connection from: %s", conn.RemoteAddr().String())
+
 	for {
 		buf, err := reader.ReadSlice(byte('\n'))
 		if err != nil {
 			break
 		}
-		request := strings.Split(string(buf), " ")
+		request := strings.Split(string(buf[0:len(buf)-1]), " ")
 
 		err = s.requestHandler(request)
 		var response string
 		if err == nil {
-			response = "ok"
+			response = "ok\n"
 		} else {
-			response = "error " + err.Error()
+			response = "error " + err.Error() + "\n"
 		}
 
 		if _, err = conn.Write([]byte(response)); err != nil {
@@ -62,6 +64,8 @@ func (s *ServerManager) run(listener net.Listener) {
 }
 
 func (s *ServerManager) connect(host string, req <-chan []string, res chan<- error) {
+	log.Printf("connecting to %s", host)
+
 	dialer := &net.Dialer{
 		Timeout:   time.Second * 1,
 		KeepAlive: time.Second * 10,
@@ -72,6 +76,7 @@ func (s *ServerManager) connect(host string, req <-chan []string, res chan<- err
 		InsecureSkipVerify: true, // insecure, not suitable for production
 	})
 	if err != nil {
+		log.Printf("cannot connect to %s: %s", host, err.Error())
 		return
 	}
 
@@ -93,7 +98,7 @@ Outer:
 			break Outer
 		}
 
-		data := strings.Join(request, " ")
+		data := strings.Join(request, " ") + "\n"
 
 		if _, err := conn.Write([]byte(data)); err != nil {
 			sendRes(errors.New("error while sending request"))
