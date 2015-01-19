@@ -68,7 +68,9 @@ func (s *ServerManager) connect(host string, req <-chan []string, res chan<- err
 	}
 	addr := fmt.Sprintf("%s:%d", host, s.connPort)
 
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{})
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		InsecureSkipVerify: true, // insecure, not suitable for production
+	})
 	if err != nil {
 		return
 	}
@@ -151,9 +153,8 @@ func (s *ServerManager) SendMessage(host string, data ...string) error {
 
 func NewServerManager(serverCert tls.Certificate, serverAddr, serverName string, connPort int, handl ServerRequestHandler) (*ServerManager, error) {
 	tlsConfig := tls.Config{
-		Certificates:       []tls.Certificate{serverCert},
-		ServerName:         serverName,
-		InsecureSkipVerify: true, // insecure, not suitable for production
+		Certificates: []tls.Certificate{serverCert},
+		ServerName:   serverName,
 		CipherSuites: []uint16{
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
