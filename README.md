@@ -24,7 +24,7 @@ create configuration file `config.json` and TLS certificate.
 Example JSON configuration file:
 
     {
-        "ServerAddr": "127.0.0.1:24948",
+        "ServerAddr": "127.0.0.1",
         "ServerName": "localhost",
         "CertFile": "server.crt",
         "KeyFile": "server.key"
