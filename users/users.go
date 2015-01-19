@@ -194,6 +194,10 @@ func (s *UserSet) SetFriendship(u1, u2 *User) {
 		return
 	}
 
+	if u1.data.friendshipRequests[u2] == nil && u2.data.friendshipRequests[u1] == nil {
+		return
+	}
+
 	delete(u1.data.friendshipRequests, u2)
 	delete(u2.data.friendshipRequests, u1)
 
