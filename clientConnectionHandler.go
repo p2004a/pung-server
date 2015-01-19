@@ -432,17 +432,20 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 	friendHost := matches[2]
 
 	if friendHost != serverConfig.ServerName {
-		c.errorForRequest(req, "friends from other server aren't implemented yet")
-		return
-	}
+		err := serverManager.SendMessage(friendHost, "add_friend", c.user.FullId())
+		if err != nil {
+			c.errorForRequest(req, "Cannot add friend from other server: "+err.Error())
+			return
+		}
+	} else {
+		friend := userSet.GetUser(friendPungID)
+		if friend == nil {
+			c.errorForRequest(req, "User with requested id doesn't exist")
+			return
+		}
 
-	friend := userSet.GetUser(friendPungID)
-	if friend == nil {
-		c.errorForRequest(req, "User with requested id doesn't exist")
-		return
+		userSet.SendFriendshipRequest(c.user, friend)
 	}
-
-	userSet.SendFriendshipRequest(c.user, friend)
 
 	c.simpleResponse(req, "ok")
 }
