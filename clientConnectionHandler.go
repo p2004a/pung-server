@@ -423,7 +423,13 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 	}
 
 	if friendHost != serverConfig.ServerName {
-		err := serverManager.SendMessage(friendHost, "add_friend", friendPungID, c.user.FullId())
+		buf, err := rsaPublicKeyToDER(c.user.Key)
+		if err != nil {
+			panic("cannot create der from pubkey")
+		}
+		keyStr := base64.StdEncoding.EncodeToString(buf)
+
+		err = serverManager.SendMessage(friendHost, "add_friend", friendPungID, c.user.FullId(), keyStr)
 		if err != nil {
 			c.errorForRequest(req, "Cannot add friend from other server: "+err.Error())
 			return

@@ -1,24 +1,59 @@
 package main
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/p2004a/pung-server/users"
 )
 
-func serverAddFriendProcedure(user *users.User, friendPundID string, data []string) error {
+func serverAddFriendProcedure(user *users.User, friendPungID string, data []string) error {
+	if len(data) != 1 {
+		return errors.New("incorrect request payload")
+	}
+
+	keyBuff, err := base64.StdEncoding.DecodeString(data[0])
+	if err != nil {
+		return errors.New("Key was not valid base64")
+	}
+	key, err := rsaPublicKeyFromDER(keyBuff)
+	if err != nil {
+		return errors.New("Cannot parse key")
+	}
+
+	friend := userSet.GetUser(friendPungID)
+	if friend == nil {
+		user := users.NewUser()
+		user.Name, user.Host, _ = parsePungID(friendPungID)
+		user.Key = key
+		if !userSet.AddUser(user) {
+			friend = userSet.GetUser(friendPungID)
+		}
+	}
+
+	userSet.SendFriendshipRequest(user, friend)
+
+	return nil
+}
+
+func serverSendMessageProcedure(user *users.User, friendPungID string, data []string) error {
+	if len(data) != 4 {
+		return errors.New("incorrect request payload")
+	}
 	return errors.New("not implemented")
 }
 
-func serverSendMessageProcedure(user *users.User, friendPundID string, data []string) error {
+func serverAcceptFriendshipProcedure(user *users.User, friendPungID string, data []string) error {
+	if len(data) != 0 {
+		return errors.New("incorrect request payload")
+	}
 	return errors.New("not implemented")
 }
 
-func serverAcceptFriendshipProcedure(user *users.User, friendPundID string, data []string) error {
-	return errors.New("not implemented")
-}
-
-func serverRefuseFriendshipProcedure(user *users.User, friendPundID string, data []string) error {
+func serverRefuseFriendshipProcedure(user *users.User, friendPungID string, data []string) error {
+	if len(data) != 0 {
+		return errors.New("incorrect request payload")
+	}
 	return errors.New("not implemented")
 }
 
