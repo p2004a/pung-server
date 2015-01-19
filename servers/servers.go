@@ -145,7 +145,7 @@ func (s *ServerManager) SendMessage(host string, data ...string) error {
 	case serv.req <- data:
 		return <-serv.res
 	case <-time.After(time.Second):
-		return errors.New("timeouted")
+		return errors.New(fmt.Sprintf("sending request to %s timeouted", host))
 	}
 }
 
@@ -179,6 +179,7 @@ func NewServerManager(serverCert tls.Certificate, serverAddr, serverName string,
 		serverName:     serverName,
 		connPort:       connPort,
 		requestHandler: handl,
+		serverMap:      make(map[string]*serverConn),
 	}
 	go sm.run(listener)
 	return sm, nil
