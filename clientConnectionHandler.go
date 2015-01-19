@@ -74,19 +74,13 @@ type ClientConnHandl struct {
 	reqMapMux   sync.Mutex
 	user        *users.User
 	loginStruct *users.LoginStruct
-	pungRE      *regexp.Regexp
 }
 
 func NewClientConnHandl(conn net.Conn) *ClientConnHandl {
-	pungRE, err := regexp.Compile("^([a-z][a-z_0-9]{2,19})@((?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9]))$")
-	if err != nil {
-		panic("incorrect pungRE reqular expresion")
-	}
 	return &ClientConnHandl{
 		conn:   conn,
 		state:  Connected,
 		reqMap: make(map[int]RequestChannels),
-		pungRE: pungRE,
 	}
 }
 
@@ -422,13 +416,11 @@ func (c *ClientConnHandl) addFriendProcedure(req *ClientRequest) {
 	}
 
 	friendPungID := req.payload[0]
-	if !c.pungRE.MatchString(friendPungID) {
+	_, friendHost, err := parsePungID(friendPungID)
+	if err != nil {
 		c.errorForRequest(req, "friend id doesn't match valid PungID")
 		return
 	}
-
-	matches := c.pungRE.FindStringSubmatch(friendPungID)
-	friendHost := matches[2]
 
 	if friendHost != serverConfig.ServerName {
 		err := serverManager.SendMessage(friendHost, "add_friend", friendPungID, c.user.FullId())
@@ -544,7 +536,7 @@ func (c *ClientConnHandl) sendMessageProcedure(req *ClientRequest) {
 	}
 
 	friendPungID := req.payload[0]
-	if !c.pungRE.MatchString(friendPungID) {
+	if !pungRE.MatchString(friendPungID) {
 		c.errorForRequest(req, "Friend id doesn't match valid PungID")
 		return
 	}
