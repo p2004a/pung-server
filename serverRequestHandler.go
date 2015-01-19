@@ -31,7 +31,7 @@ func serverAddFriendProcedure(user *users.User, friendPungID string, data []stri
 		}
 	}
 
-	userSet.SendFriendshipRequest(user, friend)
+	userSet.SendFriendshipRequest(friend, user)
 
 	return nil
 }
