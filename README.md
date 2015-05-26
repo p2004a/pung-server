@@ -35,7 +35,7 @@ that will fulfill your needs for example
 [this](http://www.akadia.com/services/ssh_test_certificate.html). To create
 self signed certificate for localhost:
 
-    openssl genrsa -out server.key 1024
+    openssl ecparam -name secp521r1 -out server.key -genkey
     # set only Common Name to localhost
     openssl req -new -key server.key -out server.csr
     openssl x509 -req -days 3650 -in server.csr -signkey server.key -out server.crt
